@@ -100,6 +100,7 @@ from eddy.core.functions.path import expandPath
 from eddy.core.functions.path import shortPath
 from eddy.core.functions.signals import connect
 from eddy.core.items.common import AbstractItem
+from eddy.core.loaders.owl2 import OWL2OntologyLoader
 from eddy.core.loaders.graphml import GraphMLOntologyLoader
 from eddy.core.loaders.graphol import GrapholOntologyLoader_v2
 from eddy.core.loaders.graphol import GrapholProjectLoader_v2
@@ -720,6 +721,8 @@ class Session(HasReasoningSystem, HasActionSystem, HasMenuSystem, HasPluginSyste
         """
         Initialize diagram and project loaders.
         """
+        self.addOntologyLoader(OWL2OntologyLoader)
+
         self.addOntologyLoader(GraphMLOntologyLoader)
         self.addOntologyLoader(GrapholOntologyLoader_v2)
         self.addProjectLoader(GrapholProjectLoader_v2)

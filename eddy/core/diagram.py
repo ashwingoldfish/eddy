@@ -220,19 +220,18 @@ class Diagram(QtWidgets.QGraphicsScene):
                                                                                      dict())
                 Duplicate_dict_1 = self.project.addIRINodeEntry(Duplicate_dict_1, iri, node)
 
-                if Duplicate_dict_1 is not None:
-                    pass
-
-                commands.append(CommandProjectDisconnectSpecificSignals(self.project))
-                commands.append(CommandProjetSetIRIPrefixesNodesDict(self.project, Duplicate_dict_2, Duplicate_dict_1,
-                                                                 [iri], None))
+                if Duplicate_dict_1 != Duplicate_dict_2:
+                    commands.append(CommandProjectDisconnectSpecificSignals(self.project))
+                    commands.append(CommandProjetSetIRIPrefixesNodesDict(self.project, Duplicate_dict_2, Duplicate_dict_1,
+                                                                     [iri], None))
             commands.append(CommandNodeAdd(self, node))
 
             if iri is not None:
 
-                commands.append(CommandProjetSetIRIPrefixesNodesDict(self.project, Duplicate_dict_2, Duplicate_dict_1,
-                                                                     [iri], None))
-                commands.append(CommandProjectConnectSpecificSignals(self.project))
+                if Duplicate_dict_1 != Duplicate_dict_2:
+                    commands.append(CommandProjetSetIRIPrefixesNodesDict(self.project, Duplicate_dict_2, Duplicate_dict_1,
+                                                                         [iri], None))
+                    commands.append(CommandProjectConnectSpecificSignals(self.project))
 
             if any(commands):
                 self.session.undostack.beginMacro('node Add - {0}'.format(node.name))

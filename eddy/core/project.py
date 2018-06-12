@@ -233,6 +233,23 @@ class Project(QtCore.QObject):
 
         return project_prefixes
 
+    def get_iri_and_rc_from_full_iri(self,full_iri):
+
+        last_slash = 999999
+        last_hash = 999999
+
+        if '/' in full_iri:
+            last_slash = full_iri.rindex('/')
+        if '#' in full_iri:
+            last_hash = full_iri.rindex('#')
+
+        max_index = max(last_slash,last_hash)
+
+        iri = full_iri[0:max_index]
+        rc = full_iri[max_index+1:len(full_iri)]
+
+        return [iri,rc]
+
     def get_iri_of_node(self,node_inp):
 
         iris = set()
