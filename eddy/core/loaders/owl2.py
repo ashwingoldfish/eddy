@@ -68,6 +68,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
         self.DefaultPrefixManager = autoclass('org.semanticweb.owlapi.util.DefaultPrefixManager')
         self.IRI = autoclass('org.semanticweb.owlapi.model.IRI')
         self.OWLClassExpression = autoclass('org.semanticweb.owlapi.model.OWLClassExpression')
+        self.ClassExpressionType = autoclass('org.semanticweb.owlapi.model.ClassExpressionType')
         self.OWLIndividual = autoclass('org.semanticweb.owlapi.model.OWLIndividual')
         self.OWLAxiom = autoclass('org.semanticweb.owlapi.model.OWLAxiom')
         self.AxiomType = autoclass('org.semanticweb.owlapi.model.AxiomType')
@@ -75,6 +76,11 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
         self.PrefixManager = autoclass('org.semanticweb.owlapi.model.PrefixManager')
         self.OWLManager = autoclass('org.semanticweb.owlapi.apibinding.OWLManager')
         self.OWLOntologyID = autoclass('org.semanticweb.owlapi.model.OWLOntologyID')
+
+        self.OWLObjectUnionOf = autoclass('org.semanticweb.owlapi.model.OWLObjectUnionOf')
+        self.OWLObjectIntersectionOf = autoclass('org.semanticweb.owlapi.model.OWLObjectIntersectionOf')
+        self.OWLObjectComplementOf = autoclass('org.semanticweb.owlapi.model.OWLObjectComplementOf')
+        self.OWLObjectOneOf = autoclass('org.semanticweb.owlapi.model.OWLObjectOneOf')
 
         self.FunctionalSyntaxDocumentFormat = autoclass('org.semanticweb.owlapi.formats.FunctionalSyntaxDocumentFormat')
         self.ManchesterSyntaxDocumentFormat = autoclass('org.semanticweb.owlapi.formats.ManchesterSyntaxDocumentFormat')
@@ -108,160 +114,19 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         self.occupied_positions_xy = [[0,0]]
 
-    def process_Class_Expression_Axiom(self,axiom):
-        ### https://www.w3.org/TR/owl2-quick-reference/
-        # Class Expression Axioms
-        #
-        #   SubClassOf(C1 C2)
-        #   EquivalentClasses(C1 … Cn)
-        #   DisjointClasses(C1 C2)
-        #   DisjointClasses(C1 … Cn)
-        #   DisjointUnionOf(CN C1 … Cn)
-        ###
-        pass
-
-    def process_Object_Property_Axiom(self,axiom):
-        ###
-        # Object_Property_Axioms
-        #
-        #   SubObjectPropertyOf(P1 P2)
-        #   SubObjectPropertyOf(ObjectPropertyChain(P1 … Pn) P)
-        #   ObjectPropertyDomain(P C)
-        #   ObjectPropertyRange(P C)
-        #   EquivalentObjectProperties(P1 … Pn)
-        #   DisjointObjectProperties(P1 P2)
-        #   DisjointObjectProperties(P1 … Pn)
-        #   InverseObjectProperties(P1 P2)
-        #   FunctionalObjectProperty(P)
-        #   InverseFunctionalObjectProperty(P)
-        #   ReflexiveObjectProperty(P)
-        #   IrreflexiveObjectProperty(P)
-        #   SymmetricObjectProperty(P)
-        #   AsymmetricObjectProperty(P)
-        #   TransitiveObjectProperty(P)
-        pass
-
-    def process_Data_Property_Axiom(self,axiom):
-        ###
-        #   Data_Property_Axioms
-        #
-        #   SubDataPropertyOf(R1 R2)
-        #   DataPropertyDomain(R C)
-        #   DataPropertyRange(R D)
-        #   EquivalentDataProperties(R1 … Rn)
-        #   DisjointDataProperties(R1 R2)
-        #   DisjointDataProperties(R1 … Rn)
-        #   FunctionalDataProperty(R)
-
-        pass
+        self.diagram_to_place = list(self.project.diagrams())[0]
 
     def process_Datatype_Definitions(self):
         ###
         #   DatatypeDefinition(DN D)
         pass
 
-    def process_Assertion(self,axiom):
-
-        diagram = list(self.project.diagrams())[0]
-
-        print('process_Assertion_axiom >>>')
-
-        ###
-        #   Assertions
-        #
-        #   SameIndividual(a1 … an)
-        #   DifferentIndividuals(a1 a2)
-        #   DifferentIndividuals(a1 … an)
-        #   ClassAssertion(C a)
-        print('axiom.getAxiomType().toString()',axiom.getAxiomType().toString())
-        if axiom.getAxiomType().toString() == self.AxiomType.CLASS_ASSERTION.toString():
-
-            class_expression = axiom.getClassExpression()
-            cast(self.OWLClassExpression,class_expression)
-            print('class_expression.toString()',class_expression.toString())
-            nodeA = diagram.factory.create(Item.ConceptNode)
-
-            full_iriA = class_expression.toString()[1:len(class_expression.toString()) - 1]
-            resA = self.project.get_iri_and_rc_from_full_iri(full_iriA)
-            iriA = resA[0]
-            rcA = resA[1]
-
-            nodeA.setText(full_iriA)
-            nodeA.remaining_characters = rcA
-
-            individual = axiom.getIndividual()
-            cast(self.OWLIndividual,individual)
-            print('individual.toString()', individual.toString())
-            nodeB = diagram.factory.create(Item.IndividualNode)
-
-            full_iriB = individual.toString()[1:len(individual.toString()) - 1]
-            resB = self.project.get_iri_and_rc_from_full_iri(full_iriB)
-            iriB = resB[0]
-            rcB = resB[1]
-
-            nodeB.setText(full_iriB)
-            nodeB.remaining_characters = rcB
-
-            last_position_xy = self.occupied_positions_xy[-1]
-            if last_position_xy[0] > 2000:
-                new_xA = 0
-                new_yA = last_position_xy[1] + 100
-            else:
-                new_xA = last_position_xy[0] + 300
-                new_yA = last_position_xy[1]
-            self.occupied_positions_xy.append([new_xA, new_yA])
-
-            last_position_xy = self.occupied_positions_xy[-1]
-            if last_position_xy[0] > 2000:
-                new_xB = 0
-                new_yB = last_position_xy[1] + 100
-            else:
-                new_xB = last_position_xy[0] + 300
-                new_yB = last_position_xy[1]
-            self.occupied_positions_xy.append([new_xB, new_yB])
-
-            snapToGrid = self.session.action('toggle_grid').isChecked()
-            nodeA.setPos(snap(QtCore.QPoint(new_xA, new_yA), Diagram.GridSize, snapToGrid))
-            nodeB.setPos(snap(QtCore.QPoint(new_xB, new_yB), Diagram.GridSize, snapToGrid))
-
-            edge = diagram.factory.create(Item.MembershipEdge, source=nodeB)
-
-            nodeB.updateNode(selected=False)
-            currentNode = nodeA
-            insertEdge = False
-
-            if currentNode:
-                currentNode.updateNode(selected=False)
-                pvr = diagram.project.profile.checkEdge(nodeB, edge, nodeA)
-                if pvr.isValid():
-                    edge.target = currentNode
-                    insertEdge = True
-
-            # We temporarily remove the item from the diagram and we perform the
-            # insertion using the undo command that will also emit the sgnItemAdded
-            # signal hence all the widgets will be notified of the edge insertion.
-            # We do this because while creating the edge we need to display it so the
-            # user knows what he is connecting, but we don't want to truly insert
-            # it till it's necessary (when the mouse is released and the validation
-            # confirms that the generated expression is a valid graphol expression).
-            diagram.removeItem(edge)
-
-            if insertEdge:
-                return ['ClassAssertion',[nodeA,nodeB],[iriA,iriB],[edge]]
-        else:
-            return None
-        #   ObjectPropertyAssertion( PN a1 a2 )
-        #   DataPropertyAssertion( R a v )
-        #   NegativeObjectPropertyAssertion(P a1 a2 )
-        #   NegativeDataPropertyAssertion(R a v )
-        print('process_Assertion_axiom >>>')
-
     def process_Key(self,axiom):
         ###
         #  HasKey(C (P1 … Pm) (R1 … Rn) )
         pass
 
-    def process_Declaration(self,axiom):
+    def Process_Declaration(self,axiom):
         ###
         #   Declarations
         #
@@ -348,39 +213,39 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         return ['Declaration',node,iri]
 
-    def process_Annotation(self):
-        ###
-        #   Annotations
-        #
-        #   AnnotationAssertion(A s t)
-        #   AXIOM(Annotation(A t) …)
-        #   AXIOM(Annotation(A t) … )
-        #   Annotation(Annotation(A t) … A1 t1)
-        pass
+    def Process_annotated_and_import_axiom(self,axiom):
 
-    def process_Annotation_Axiom(self,axiom):
-        ###
-        # Annotation Axioms
-        #
-        #   SubAnnotationPropertyOf(A1 A2)
-        #   AnnotationPropertyDomain(A U)
-        #   AnnotationPropertyRange(A U)
-        pass
+        def process_Annotation(self, axiom):
+            ###
+            #   Annotations
+            #
+            #   AnnotationAssertion(A s t)
+            #   AXIOM(Annotation(A t) …)
+            #   AXIOM(Annotation(A t) … )
+            #   Annotation(Annotation(A t) … A1 t1)
+            pass
 
-    def process_Ontology(self):
-        ###
-        #   Ontologies
-        #
-        #   Ontology([ON [U]] Import(ON1)... Annotation(A t) ...)
-        #   Prefix(p=U)
-        pass
+        def process_Annotation_Axiom(self, axiom):
+            ###
+            # Annotation Axioms
+            #
+            #   SubAnnotationPropertyOf(A1 A2)
+            #   AnnotationPropertyDomain(A U)
+            #   AnnotationPropertyRange(A U)
+            pass
 
-    def Process_annotated_axiom(self):
+        def process_Ontology(self, axiom):
+            ###
+            #   Ontologies
+            #
+            #   Ontology([ON [U]] Import(ON1)... Annotation(A t) ...)
+            #   Prefix(p=U)
+            pass
 
-        self.process_Annotation()
-        self.process_Annotation_Axiom()
+        process_Annotation(axiom)
+        process_Annotation_Axiom(axiom)
 
-        self.process_Ontologie()
+        process_Ontology(axiom)
 
     def Process_annotation_axiom(self):
 
@@ -399,21 +264,162 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         print('Process_logical_axiom >>>')
 
-
-
         #print('axiom.getAxiomType().getName()',axiom_to_process.getAxiomType().getName())
         #print('axiom.getAxiomType().getIndex()', axiom_to_process.getAxiomType().getIndex())
         #print('axiom.getAxiomType().toString()', axiom_to_process.getAxiomType().toString())
 
         #print('axiom.toString()', axiom_to_process.toString())
 
-        self.process_Class_Expression_Axiom(axiom_to_process)
-        self.process_Object_Property_Axiom(axiom_to_process)
-        self.process_Data_Property_Axiom(axiom_to_process)
+        ## empty as of now ##
+        def process_Class_Expression_Axiom(self, axiom):
+            ### https://www.w3.org/TR/owl2-quick-reference/
+            # Class Expression Axioms
+            #
+            #   SubClassOf(C1 C2)
+            #   EquivalentClasses(C1 … Cn)
+            #   DisjointClasses(C1 C2)
+            #   DisjointClasses(C1 … Cn)
+            #   DisjointUnionOf(CN C1 … Cn)
+            ###
+            pass
+        def process_Object_Property_Axiom(self, axiom):
+            ###
+            # Object_Property_Axioms
+            #
+            #   SubObjectPropertyOf(P1 P2)
+            #   SubObjectPropertyOf(ObjectPropertyChain(P1 … Pn) P)
+            #   ObjectPropertyDomain(P C)
+            #   ObjectPropertyRange(P C)
+            #   EquivalentObjectProperties(P1 … Pn)
+            #   DisjointObjectProperties(P1 P2)
+            #   DisjointObjectProperties(P1 … Pn)
+            #   InverseObjectProperties(P1 P2)
+            #   FunctionalObjectProperty(P)
+            #   InverseFunctionalObjectProperty(P)
+            #   ReflexiveObjectProperty(P)
+            #   IrreflexiveObjectProperty(P)
+            #   SymmetricObjectProperty(P)
+            #   AsymmetricObjectProperty(P)
+            #   TransitiveObjectProperty(P)
+            pass
+        def process_Data_Property_Axiom(self, axiom):
+            ###
+            #   Data_Property_Axioms
+            #
+            #   SubDataPropertyOf(R1 R2)
+            #   DataPropertyDomain(R C)
+            #   DataPropertyRange(R D)
+            #   EquivalentDataProperties(R1 … Rn)
+            #   DisjointDataProperties(R1 R2)
+            #   DisjointDataProperties(R1 … Rn)
+            #   FunctionalDataProperty(R)
+
+            pass
+        ## ##
+
+        def process_Assertion(self, axiom):
+
+            diagram = list(self.project.diagrams())[0]
+
+            print('process_Assertion_axiom >>>')
+
+            ###
+            #   Assertions
+            #
+            #   SameIndividual(a1 … an)
+            #   DifferentIndividuals(a1 a2)
+            #   DifferentIndividuals(a1 … an)
+            #   ClassAssertion(C a)
+            print('axiom.getAxiomType().toString()', axiom.getAxiomType().toString())
+            if axiom.getAxiomType().toString() == self.AxiomType.CLASS_ASSERTION.toString():
+
+                class_expression = axiom.getClassExpression()
+                cast(self.OWLClassExpression, class_expression)
+                print('class_expression.toString()', class_expression.toString())
+                nodeA = diagram.factory.create(Item.ConceptNode)
+
+                full_iriA = class_expression.toString()[1:len(class_expression.toString()) - 1]
+                resA = self.project.get_iri_and_rc_from_full_iri(full_iriA)
+                iriA = resA[0]
+                rcA = resA[1]
+
+                nodeA.setText(full_iriA)
+                nodeA.remaining_characters = rcA
+
+                individual = axiom.getIndividual()
+                cast(self.OWLIndividual, individual)
+                print('individual.toString()', individual.toString())
+                nodeB = diagram.factory.create(Item.IndividualNode)
+
+                full_iriB = individual.toString()[1:len(individual.toString()) - 1]
+                resB = self.project.get_iri_and_rc_from_full_iri(full_iriB)
+                iriB = resB[0]
+                rcB = resB[1]
+
+                nodeB.setText(full_iriB)
+                nodeB.remaining_characters = rcB
+
+                last_position_xy = self.occupied_positions_xy[-1]
+                if last_position_xy[0] > 2000:
+                    new_xA = 0
+                    new_yA = last_position_xy[1] + 100
+                else:
+                    new_xA = last_position_xy[0] + 300
+                    new_yA = last_position_xy[1]
+                self.occupied_positions_xy.append([new_xA, new_yA])
+
+                last_position_xy = self.occupied_positions_xy[-1]
+                if last_position_xy[0] > 2000:
+                    new_xB = 0
+                    new_yB = last_position_xy[1] + 100
+                else:
+                    new_xB = last_position_xy[0] + 300
+                    new_yB = last_position_xy[1]
+                self.occupied_positions_xy.append([new_xB, new_yB])
+
+                snapToGrid = self.session.action('toggle_grid').isChecked()
+                nodeA.setPos(snap(QtCore.QPoint(new_xA, new_yA), Diagram.GridSize, snapToGrid))
+                nodeB.setPos(snap(QtCore.QPoint(new_xB, new_yB), Diagram.GridSize, snapToGrid))
+
+                edge = diagram.factory.create(Item.MembershipEdge, source=nodeB)
+
+                nodeB.updateNode(selected=False)
+                currentNode = nodeA
+                insertEdge = False
+
+                if currentNode:
+                    currentNode.updateNode(selected=False)
+                    pvr = diagram.project.profile.checkEdge(nodeB, edge, nodeA)
+                    if pvr.isValid():
+                        edge.target = currentNode
+                        insertEdge = True
+
+                # We temporarily remove the item from the diagram and we perform the
+                # insertion using the undo command that will also emit the sgnItemAdded
+                # signal hence all the widgets will be notified of the edge insertion.
+                # We do this because while creating the edge we need to display it so the
+                # user knows what he is connecting, but we don't want to truly insert
+                # it till it's necessary (when the mouse is released and the validation
+                # confirms that the generated expression is a valid graphol expression).
+                diagram.removeItem(edge)
+
+                if insertEdge:
+                    return ['ClassAssertion', [nodeA, nodeB], [iriA, iriB], [edge]]
+            else:
+                return None
+            # ObjectPropertyAssertion( PN a1 a2 )
+            #   DataPropertyAssertion( R a v )
+            #   NegativeObjectPropertyAssertion(P a1 a2 )
+            #   NegativeDataPropertyAssertion(R a v )
+            print('process_Assertion_axiom >>>')
+
+        process_Class_Expression_Axiom(axiom_to_process)
+        process_Object_Property_Axiom(axiom_to_process)
+        process_Data_Property_Axiom(axiom_to_process)
 
         #self.process_Datatype_Definitions()
 
-        op=self.process_Assertion(axiom_to_process)
+        op=process_Assertion(axiom_to_process)
 
         #self.process_Keys()
 
@@ -432,6 +438,156 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         self.process_Ontology()
 
+    def Process_ClassDescription(self,axiom):
+
+        pass
+
+    def Process_ClassExpression(self,class_expression,depth):
+
+        if class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OWL_CLASS.toString():
+            #crete a new concept node
+            node = self.diagram_to_place.factory.create(Item.ConceptNode)
+            #return [node,iri]
+            return [node,class_expression.asOWLClass().getIRI().toString(),depth]
+        else:
+            if class_expression.getClassExpressionType().toString() == self.ClassExpressionType.DATA_ALL_VALUES_FROM.toString():
+                return []
+            elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.DATA_EXACT_CARDINALITY.toString():
+                return []
+            elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.DATA_HAS_VALUE.toString():
+                return []
+            elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.DATA_MAX_CARDINALITY.toString():
+                return []
+            elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.DATA_MIN_CARDINALITY.toString():
+                return []
+            elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.DATA_SOME_VALUES_FROM.toString():
+                return []
+
+
+
+            elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OBJECT_ALL_VALUES_FROM.toString():
+                return []
+            elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OBJECT_EXACT_CARDINALITY.toString():
+                return []
+            elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OBJECT_HAS_VALUE.toString():
+                return []
+            elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OBJECT_MAX_CARDINALITY.toString():
+                return []
+            elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OBJECT_MIN_CARDINALITY.toString():
+                return []
+            elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OBJECT_SOME_VALUES_FROM.toString():
+                return []
+
+
+            elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OBJECT_UNION_OF.toString():
+
+                detach()
+                cast(self.OWLObjectUnionOf,class_expression)
+
+                #create a new OR node
+                ORnode = self.diagram_to_place.factory.create(Item.UnionNode)
+                #get all operands
+                operands = class_expression.getOperands()
+                cast(self.Set,operands)
+                itr = operands.iterator()
+
+                # for all operands
+                # append[ORnode,None,operand,operand_iri]Process_ClassExpression
+
+                temp = []
+
+                while(itr.hasNext()):
+                    operand = itr.next()
+                    processed_operand = self.Process_ClassExpression(operand,depth+1)
+                    temp.append(ORnode)
+                    temp.append('no_iri')
+                    temp.append(depth)
+                    temp.extend(processed_operand)
+
+                return temp
+
+
+            elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OBJECT_ONE_OF.toString():
+                return []
+            elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OBJECT_COMPLEMENT_OF.toString():
+
+                new_casted_class_expression = class_expression
+                cast(self.OWLObjectComplementOf,new_casted_class_expression)
+
+                # create a new NOT node
+                NOTnode = self.diagram_to_place.factory.create(Item.ComplementNode)
+                # get all operands
+                operands = new_casted_class_expression.getOperands()
+                cast(self.Set, operands)
+                itr = operands.iterator()
+
+                # for all operands
+                # append[NOTnode,None,operand,operand_iri]Process_ClassExpression
+
+                temp = []
+
+                while (itr.hasNext()):
+                    operand = itr.next()
+                    processed_operand = self.Process_ClassExpression(operand, depth + 1)
+                    temp.append(NOTnode)
+                    temp.append('no_iri')
+                    temp.append(depth)
+                    temp.extend(processed_operand)
+
+                return temp
+
+            elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OBJECT_INTERSECTION_OF.toString():
+
+                new_casted_class_expression = class_expression
+                cast(self.OWLObjectIntersectionOfOf,new_casted_class_expression)
+
+                # create a new AND node
+                ANDnode = self.diagram_to_place.factory.create(Item.UnionNode)
+                # get all operands
+                operands = new_casted_class_expression.getOperands()
+                cast(self.Set, operands)
+                itr = operands.iterator()
+
+                # for all operands
+                # append[ANDnode,None,operand,operand_iri]Process_ClassExpression
+
+                temp = []
+
+                while (itr.hasNext()):
+                    operand = itr.next()
+                    processed_operand = self.Process_ClassExpression(operand, depth + 1)
+                    temp.append(ANDnode)
+                    temp.append('no_iri')
+                    temp.append(depth)
+                    temp.extend(processed_operand)
+
+                return temp
+
+
+            elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OBJECT_HAS_SELF.toString():
+                return []
+            else:
+                return []
+
+    def Process_Class_axiom(self,axiom,commands):
+
+        if axiom.getAxiomType().toString() == self.AxiomType.SUBCLASS_OF.toString():
+            subclass = axiom.getSubClass();
+            superclass = axiom.getSuperClass();
+            #cast(self.OWLClassExpression, subclass)
+            #cast(self.OWLClassExpression, superclass)
+            sub_class_commands = self.Process_ClassExpression(subclass,1)
+            commands.extend(sub_class_commands)
+            super_class_commands = self.Process_ClassExpression(superclass,0)
+            commands.extend(super_class_commands)
+
+        else:
+            class_expressions = axiom.getClassExpressions();
+            for ce in class_expressions:
+                #cast(self.OWLClassExpression,ce)
+                disjoint_or_equivalent_commands = self.Process_ClassExpression(ce,0)
+                commands.extend(disjoint_or_equivalent_commands)
+
     def fetch_ontology_from_file(self,filename_inp):
 
         try:
@@ -446,6 +602,8 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         commands = []
 
+        """
+        ###  Declaration axioms ###
         declaration_axioms = self.ontology.getAxioms(self.AxiomType.DECLARATION)
         cast(self.Set, declaration_axioms)
         declaration_axioms_itr = declaration_axioms.iterator()
@@ -453,10 +611,35 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
             decl_axiom_to_process = declaration_axioms_itr.next()
             #cast(self.OWLAxiom, decl_axiom_to_process)
-            op = self.process_Declaration(decl_axiom_to_process)
+            op = self.Process_Declaration(decl_axiom_to_process)
             if op is not None:
                 commands.append(op)
+        ###########################
+        """
 
+        SubClassOf_axioms = self.ontology.getAxioms(self.AxiomType.SUBCLASS_OF)
+        DisjointClass_axioms = self.ontology.getAxioms(self.AxiomType.DISJOINT_CLASSES)
+        EquivalentClass_axioms = self.ontology.getAxioms(self.AxiomType.EQUIVALENT_CLASSES)
+        cast(self.Set, SubClassOf_axioms)
+        cast(self.Set, DisjointClass_axioms)
+        cast(self.Set, EquivalentClass_axioms)
+
+        itr_1 = SubClassOf_axioms.iterator()
+        itr_2 = DisjointClass_axioms.iterator()
+        itr_3 = EquivalentClass_axioms.iterator()
+
+        while itr_1.hasNext():
+            a=itr_1.next()
+            self.Process_Class_axiom(a,commands)
+        while itr_2.hasNext():
+            a = itr_2.next()
+            self.Process_Class_axiom(a,commands)
+        while itr_3.hasNext():
+            a = itr_3.next()
+            self.Process_Class_axiom(a,commands)
+        ##########################
+
+        """
         axioms_in_ontology = self.ontology.getAxioms()
         cast(self.Set,axioms_in_ontology)
         axioms_in_ontology_itr = axioms_in_ontology.iterator()
@@ -484,15 +667,15 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                 flag = True
 
             if axiom_to_process.isLogicalAxiom():
-                op=self.Process_logical_axiom(axiom_to_process)
-                if op is not None:
-                    commands.append(op)
+                #op=self.Process_logical_axiom(axiom_to_process)
+                #if op is not None:
+                #    commands.append(op)
                 flag = True
 
             if flag is False:
                 #self.process_other_type_of_axiom(axiom_to_process)
                 pass
-
+        """
         return commands
 
     def place_graphs_in_a_diagram(self):
@@ -523,13 +706,17 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         print('len(all_commands)',len(all_commands))
 
+        for c in all_commands:
+            print('c-',c)
+
+        """
+        
         Duplicate_dict_1 = self.project.copy_IRI_prefixes_nodes_dictionaries(self.project.IRI_prefixes_nodes_dict,
                                                                              dict())
         Duplicate_dict_2 = self.project.copy_IRI_prefixes_nodes_dictionaries(self.project.IRI_prefixes_nodes_dict,
                                                                              dict())
 
-        diagram = list(self.project.diagrams())[0]
-
+        
         commands_session = []
 
         all_iris = set()
@@ -587,5 +774,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
             self.session.undostack.endMacro()
 
         self.place_graphs_in_a_diagram()
+        
+        """
 
 

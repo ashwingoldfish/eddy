@@ -894,7 +894,8 @@ class OWLOntologyExporterWorker(AbstractWorker):
                 if min_cardinality:
                     cardinalities.add(self.df.getOWLDataMinCardinality(min_cardinality, dpe, dre))
                 if max_cardinality is not None:
-                    cardinalities.add(self.df.getOWLDataMinCardinality(max_cardinality, dpe, dre))
+                    #cardinalities.add(self.df.getOWLDataMinCardinality(max_cardinality, dpe, dre))  bug fix
+                    cardinalities.add(self.df.getOWLDataMaxCardinality(max_cardinality, dpe, dre))
                 if cardinalities.isEmpty():
                     raise DiagramMalformedError(node, 'missing cardinality')
                 if cardinalities.size() > 1:
@@ -2445,7 +2446,8 @@ class OWLOntologyFetcher(AbstractWorker):
                 if min_cardinality:
                     cardinalities.add(self.df.getOWLDataMinCardinality(min_cardinality, dpe, dre))
                 if max_cardinality is not None:
-                    cardinalities.add(self.df.getOWLDataMinCardinality(max_cardinality, dpe, dre))
+                    #cardinalities.add(self.df.getOWLDataMinCardinality(max_cardinality, dpe, dre)) bug fix
+                    cardinalities.add(self.df.getOWLDataMaxCardinality(max_cardinality, dpe, dre))
                 if cardinalities.isEmpty():
                     raise DiagramMalformedError(node, 'missing cardinality')
                 if cardinalities.size() > 1:
