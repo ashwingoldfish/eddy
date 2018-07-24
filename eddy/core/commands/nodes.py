@@ -65,6 +65,33 @@ class CommandNodeAdd(QtWidgets.QUndoCommand):
         self.diagram.sgnItemRemoved.emit(self.diagram, self.node)
         self.diagram.sgnUpdated.emit()
 
+class CommandNodesAdd(QtWidgets.QUndoCommand):
+    """
+    This command is used to add a nodes to a diagram.
+    """
+    def __init__(self, diagram, nodes):
+        """
+        Initialize the command.
+        :type diagram: Diagram
+        :type node: AbstractNode
+        """
+        super().__init__('add nodes of length'.format(len(nodes)))
+        self.diagram = diagram
+        self.nodes = nodes
+
+    def redo(self):
+        """redo the command"""
+        for node in self.nodes:
+            self.diagram.addItem(node)
+            self.diagram.sgnItemAdded.emit(self.diagram, node)
+        self.diagram.sgnUpdated.emit()
+
+    def undo(self):
+        """undo the command"""
+        for node in self.nodes:
+            self.diagram.removeItem(node)
+            self.diagram.sgnItemRemoved.emit(self.diagram, node)
+        self.diagram.sgnUpdated.emit()
 
 class CommandNodeSetDepth(QtWidgets.QUndoCommand):
     """

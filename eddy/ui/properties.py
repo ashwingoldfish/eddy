@@ -373,7 +373,8 @@ class NodeProperty(PropertyDialog):
         self.mainLayout.addWidget(self.mainWidget)
         self.mainLayout.addWidget(self.confirmationBox, 0, QtCore.Qt.AlignRight)
 
-        self.setWindowTitle('Properties: {0}'.format(self.node.text().replace('\n', '')))
+        if self.node.text() is not None:
+            self.setWindowTitle('Properties: {0}'.format(self.node.text().replace('\n', '')))
         self.setWindowIcon(QtGui.QIcon(':/icons/128/ic_eddy'))
 
         connect(self.confirmationBox.accepted, self.complete)

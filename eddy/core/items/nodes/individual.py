@@ -66,7 +66,7 @@ class IndividualNode(AbstractResizableNode):
     Identities = {Identity.Individual, Identity.Value}
     Type = Item.IndividualNode
 
-    def __init__(self, width=60, height=60, brush=None, remaining_characters='individual', **kwargs):
+    def __init__(self, width=40, height=40, brush=None, remaining_characters='individual', **kwargs):
         """
         Initialize the node.
         :type width: int
@@ -75,8 +75,8 @@ class IndividualNode(AbstractResizableNode):
         """
         super().__init__(**kwargs)
 
-        w = max(width, 60)
-        h = max(height, 60)
+        w = max(width, 40)
+        h = max(height, 40)
         brush = brush or IndividualNode.DefaultBrush
         pen = IndividualNode.DefaultPen
 
