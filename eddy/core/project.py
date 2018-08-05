@@ -233,7 +233,7 @@ class Project(QtCore.QObject):
 
         return project_prefixes
 
-    def get_iri_and_rc_from_full_iri(self,full_iri):
+    def get_iri_and_rc_from_full_iri(self, full_iri):
 
         last_slash = 999999
         last_hash = 999999

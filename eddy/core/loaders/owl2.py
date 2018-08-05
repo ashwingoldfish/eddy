@@ -45,12 +45,12 @@ from eddy.core.items.factory import ItemFactory
 from eddy.core.diagram import Diagram
 from eddy.core.commands.nodes_2 import CommandProjetSetIRIPrefixesNodesDict
 from eddy.core.commands.project import CommandProjectDisconnectSpecificSignals, CommandProjectConnectSpecificSignals
-from eddy.core.commands.edges import CommandEdgeAdd
+from eddy.core.commands.edges import CommandEdgeAdd, CommandEdgesBreakpointsAdd, CommandEdgesAdd
 from eddy.core.commands.nodes import CommandNodeAdd, CommandNodesAdd
 from eddy.core.commands.diagram import CommandDiagramResize
 from eddy.core.datatypes.owl import OWLStandardIRIPrefixPairsDict
 
-import sys,math
+import sys,math,time
 
 LOGGER = getLogger()
 
@@ -70,10 +70,17 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         self.DefaultPrefixManager = autoclass('org.semanticweb.owlapi.util.DefaultPrefixManager')
         self.IRI = autoclass('org.semanticweb.owlapi.model.IRI')
+
+        self.OWLClass = autoclass('org.semanticweb.owlapi.model.OWLClass')
         self.OWLDataPropertyExpression = autoclass('org.semanticweb.owlapi.model.OWLDataPropertyExpression')
         self.OWLObjectPropertyExpression = autoclass('org.semanticweb.owlapi.model.OWLObjectPropertyExpression')
         self.OWLClassExpression = autoclass('org.semanticweb.owlapi.model.OWLClassExpression')
+        self.OWLDataRange = autoclass('org.semanticweb.owlapi.model.OWLDataRange')
+        self.OWLLiteral = autoclass('org.semanticweb.owlapi.model.OWLLiteral')
         self.OWLIndividual = autoclass('org.semanticweb.owlapi.model.OWLIndividual')
+        self.OWLFacet = autoclass('org.semanticweb.owlapi.vocab.OWLFacet')
+        self.OWL2Datatype = autoclass('org.semanticweb.owlapi.vocab.OWL2Datatype')
+
         self.OWLAxiom = autoclass('org.semanticweb.owlapi.model.OWLAxiom')
         self.AxiomType = autoclass('org.semanticweb.owlapi.model.AxiomType')
         self.OWLOntology = autoclass('org.semanticweb.owlapi.model.OWLOntology')
@@ -104,14 +111,10 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
         self.OWLDataMaxCardinality = autoclass('org.semanticweb.owlapi.model.OWLDataMaxCardinality')
         self.OWLDataExactCardinality = autoclass('org.semanticweb.owlapi.model.OWLDataExactCardinality')
 
-        self.OWLDataRange = autoclass('org.semanticweb.owlapi.model.OWLDataRange')
-
         self.FunctionalSyntaxDocumentFormat = autoclass('org.semanticweb.owlapi.formats.FunctionalSyntaxDocumentFormat')
         self.ManchesterSyntaxDocumentFormat = autoclass('org.semanticweb.owlapi.formats.ManchesterSyntaxDocumentFormat')
 
         self.OWLAnnotationValue = autoclass('org.semanticweb.owlapi.model.OWLAnnotationValue')
-        self.OWLFacet = autoclass('org.semanticweb.owlapi.vocab.OWLFacet')
-        self.OWL2Datatype = autoclass('org.semanticweb.owlapi.vocab.OWL2Datatype')
 
         self.OWLOntologyDocumentTarget = autoclass('org.semanticweb.owlapi.io.OWLOntologyDocumentTarget')
         self.StringDocumentTarget = autoclass('org.semanticweb.owlapi.io.StringDocumentTarget')
@@ -123,6 +126,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
         self.LinkedList = autoclass('java.util.LinkedList')
         self.List = autoclass('java.util.List')
         self.HashSet = autoclass('java.util.HashSet')
+        self.Object = autoclass('java.lang.Object')
 
         self.project = project
         self.syntax = None
@@ -137,11 +141,21 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
         self.diag_entity_axioms_dict = dict()
 
         self.occupied_positions_xy = dict()
+        self.occupied_rectangles = []
 
         self.diagram_to_place = list(self.project.diagrams())[0]
 
         self.exclusion_list = ['RoleNode:', 'AttributeNode:', 'DomainRestrictionNode:', 'RangeRestrictionNode:',
                                'ValueDomainNode:', 'IndividualNode:', 'EnumerationNode:', 'RoleInverseNode:']
+
+        self.disjoint_class_expressions_for_all_DisjointClassesAxioms = []
+        self.disjoint_class_expressionsNos_for_all_DisjointClassesAxioms_to_be_ignored = []
+
+        self.ClassExpressions_unique = []
+        self.ClassExpressions_to_nodes_mapping = []
+
+        self.AttributesANDRoles_to_DomainANDRange_mapping = dict()
+        self.attributes_for_classexpressions = dict()
 
     def process_Datatype_Definitions(self):
         ###
@@ -203,7 +217,6 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
             return None
         else:
             return [node, iri_to_append]
-
 
     def Process_annotated_and_import_axiom(self,axiom):
 
@@ -466,9 +479,47 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         return return_result
 
-    def Process_FacetRestriction(self, facet_restriction, nodes_dict, iri_node_str_dict, depth):
+    def check_if_all_class_expressions_are_disjoint(self, all_operands):
+
+        flag = False
+
+        for ax_no, disj_ces in enumerate(self.disjoint_class_expressions_for_all_DisjointClassesAxioms):
+
+            present = set()
+            # check if all operators are present.
+            for opr in all_operands:
+
+                opr_present = set()
+
+                for dis_ce in disj_ces:
+                    #print('opr.equals(dis_ce)',opr.equals(dis_ce))
+                    if dis_ce.compareTo(opr) == 0:
+                        opr_present.add(True)
+                        break
+                    else:
+                        opr_present.add(False)
+
+                if True not in opr_present:
+                    present.add(False)
+                    break
+                else:
+                    present.add(True)
+
+            if False not in present:
+                #all operators are present
+                # no need to generate a C.E with not node; add it to ignore list
+                self.disjoint_class_expressionsNos_for_all_DisjointClassesAxioms_to_be_ignored.append(ax_no)
+                flag = True
+            else:
+                pass
+
+        return flag
+
+    def Process_FacetRestriction(self, facet_restriction_raw, nodes_dict, iri_node_str_dict, depth):
 
         #print('depth', depth)
+
+        facet_restriction = cast(self.OWLFacet, facet_restriction_raw)
 
         facet = facet_restriction.getFacet()
         literal = facet_restriction.getFacetValue().getLiteral()
@@ -488,6 +539,8 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
     def Process_Literal(self, literal_raw, nodes_dict, iri_node_str_dict, depth):
 
+        literal = cast(self.OWLLiteral, literal_raw)
+
         #print('depth', depth)
 
         #datatype = literal_raw.getDatatype()
@@ -506,7 +559,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         return node
 
-    def Process_DataRange(self, filler_range, nodes_dict, edges_dict, iri_node_str_dict, depth):
+    def Process_DataRange(self, filler_range_raw, nodes_dict, edges_dict, iri_node_str_dict, depth):
+
+        filler_range = cast(self.OWLDataRange, filler_range_raw)
 
         range_type = filler_range.getDataRangeType()
 
@@ -520,28 +575,25 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
             #print('range_type.toString() == range_type.DATATYPE.toString()')
 
             n_dre_cast = filler_range.asOWLDatatype()
-            iri_to_append_raw = n_dre_cast.getIRI().toString().replace(
-                'http://www.dis.uniroma1.it/~graphol/pizza', 'P')
-            iri_to_append = self.IRI.create(iri_to_append_raw)
-
+            iri_to_append = n_dre_cast.getIRI()
             #print('iri_to_append',iri_to_append)
 
-            node = self.get_node_from_iri(iri_to_append, iri_node_str_dict)
-            if node is None:
-                node = self.diagram_to_place.factory.create(Item.ValueDomainNode)
+            #node = self.get_node_from_iri(iri_to_append, iri_node_str_dict)
+            #if node is None:
+            node = self.diagram_to_place.factory.create(Item.ValueDomainNode)
 
-                # set the value domain
-                iri_and_rc = self.project.get_iri_and_rc_from_full_iri(iri_to_append.toString())
-                prefix = self.project.get_prefix_for_iri(iri_and_rc[0])
+            # set the value domain
+            iri_and_rc = self.project.get_iri_and_rc_from_full_iri(iri_to_append.toString())
+            prefix = self.project.get_prefix_for_iri(iri_and_rc[0])
 
-                #print('prefix', prefix)
-                #print('iri_and_rc[1]', iri_and_rc[1])
+            # print('prefix', prefix)
+            # print('iri_and_rc[1]', iri_and_rc[1])
 
-                node.setText(prefix+':'+iri_and_rc[1])
-                #node.setText(iri_to_append)
+            node.setText(prefix + ':' + iri_and_rc[1])
+            # node.setText(iri_to_append)
 
-                nodes_dict[str(node)] = []
-                iri_node_str_dict[str(node)] = [node, iri_to_append]
+            nodes_dict[str(node)] = []
+            iri_node_str_dict[str(node)] = [node, iri_to_append]
 
             return node
 
@@ -663,8 +715,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
         else:
             object_property = new_casted_ope.asOWLObjectProperty()
 
-        iri_to_append_raw = object_property.getIRI().toString().replace('http://www.dis.uniroma1.it/~graphol/pizza', 'P')
-        iri_to_append = self.IRI.create(iri_to_append_raw)
+        iri_to_append = object_property.getIRI()
         node = self.get_node_from_iri(iri_to_append, iri_node_str_dict)
         if node is None:
             node = self.diagram_to_place.factory.create(Item.RoleNode)
@@ -685,42 +736,42 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
         else:
             object_property = new_casted_ope.asOWLObjectProperty()
 
-        iri_to_append_raw = object_property.getIRI().toString().replace('http://www.dis.uniroma1.it/~graphol/pizza', 'P')
-        iri_to_append = self.IRI.create(iri_to_append_raw)
+        iri_to_append = object_property.getIRI()
         node = self.get_node_from_iri(iri_to_append, iri_node_str_dict)
         if node is None:
             node = self.diagram_to_place.factory.create(Item.RoleNode)
             nodes_dict[str(node)] = []
             iri_node_str_dict[str(node)] = [node, iri_to_append]
+            self.AttributesANDRoles_to_DomainANDRange_mapping[str(node)] = []
 
         return [node, flag_inverse]
 
     def Process_DataPropertyExpression_2(self, dpe, nodes_dict, iri_node_str_dict, depth):
 
-        print('depth', depth)
+        #print('depth', depth)
 
         new_casted_dpe = cast(self.OWLDataPropertyExpression, dpe)
 
         data_property = new_casted_dpe.asOWLDataProperty()
 
-        iri_to_append_raw = data_property.getIRI().toString().replace('http://www.dis.uniroma1.it/~graphol/pizza', 'P')
-        iri_to_append = self.IRI.create(iri_to_append_raw)
+        iri_to_append = data_property.getIRI()
         node = self.get_node_from_iri(iri_to_append, iri_node_str_dict)
         if node is None:
             node = self.diagram_to_place.factory.create(Item.AttributeNode)
             nodes_dict[str(node)] = []
             iri_node_str_dict[str(node)] = [node, iri_to_append]
+            self.AttributesANDRoles_to_DomainANDRange_mapping[str(node)] = []
 
         return node
 
-    def Process_Individual(self, ind, nodes_dict, iri_node_str_dict, depth):
+    def Process_Individual(self, ind_raw, nodes_dict, iri_node_str_dict, depth):
+
+        ind = cast(self.OWLIndividual, ind_raw)
 
         if ind.isAnonymous():
             return self.diagram_to_place.factory.create(Item.IndividualNode)
         else:
-            iri_to_append_raw = ind.asOWLNamedIndividual().getIRI().toString().replace(
-                'http://www.dis.uniroma1.it/~graphol/pizza', 'P')
-            iri_to_append = self.IRI.create(iri_to_append_raw)
+            iri_to_append = ind.asOWLNamedIndividual().getIRI()
 
             node = self.get_node_from_iri(iri_to_append, iri_node_str_dict)
 
@@ -730,14 +781,14 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                 iri_node_str_dict[str(node)] = [node, iri_to_append]
             return node
 
+    #not used
     def Process_ClassExpression(self, class_expression, commands, iri_node_str_dict):
 
-        cl_str = class_expression.toString().replace('http://www.dis.uniroma1.it/~graphol/pizza','P')
+        cl_str = class_expression.toString()
 
         if class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OWL_CLASS.toString():
 
-            iri_to_append_raw = class_expression.asOWLClass().getIRI().toString().replace('http://www.dis.uniroma1.it/~graphol/pizza', 'P')
-            iri_to_append = self.IRI.create(iri_to_append_raw)
+            iri_to_append = class_expression.asOWLClass().getIRI()
             node = self.get_node_from_iri(iri_to_append, iri_node_str_dict)
             if node is None:
                 node = self.diagram_to_place.factory.create(Item.ConceptNode)
@@ -1042,23 +1093,50 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
             else:
                 return self.create_and_return_dummy_node(cl_str, iri_node_str_dict)
 
-    def Process_ClassExpression_2(self, class_expression, nodes_dict, edges_dict, iri_node_str_dict, depth):
+    def Process_ClassExpression_2(self, class_expression_raw, nodes_dict, edges_dict, iri_node_str_dict, depth):
 
-        cl_str = class_expression.toString().replace('http://www.dis.uniroma1.it/~graphol/pizza','P')
+        class_expression = cast(self.OWLClassExpression, class_expression_raw)
+
+        cl_str = class_expression.toString()
 
         #print('class_expression.toString()',class_expression.toString())
         #print('depth - ', depth)
 
+        for ind_drce, classexpression_unique in enumerate(self.ClassExpressions_unique):
+            casted_class_expression = cast(self.Object, class_expression)
+            casted_classexpression_unique = cast(self.Object, classexpression_unique)
+
+            int_java = class_expression.compareTo(classexpression_unique)
+
+            #print('int_java',int_java)
+
+            #res = casted_class_expression.equals(casted_classexpression_unique)
+            #res_2 = class_expression.equals(classexpression_unique)
+
+            #print('res',res)
+            #print('res', res_2)
+
+            if int_java == 0:
+                #print('classexpression_unique', classexpression_unique.toString())
+                #print('class_expression', class_expression.toString())
+                node_to_return = self.ClassExpressions_to_nodes_mapping[ind_drce]
+                return node_to_return
+
         if class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OWL_CLASS.toString():
 
-            iri_to_append_raw = class_expression.asOWLClass().getIRI().toString().replace('http://www.dis.uniroma1.it/~graphol/pizza', 'P')
-            iri_to_append = self.IRI.create(iri_to_append_raw)
+            new_casted_class_expression = cast(self.OWLClass, class_expression)
 
-            node = self.get_node_from_iri(iri_to_append, iri_node_str_dict)
-            if node is None:
-                node = self.diagram_to_place.factory.create(Item.ConceptNode)
-                nodes_dict[str(node)] = []
-                iri_node_str_dict[str(node)] = [node, iri_to_append]
+            iri_to_append = new_casted_class_expression.getIRI()
+
+            #node = self.get_node_from_iri(iri_to_append, iri_node_str_dict)
+            #if node is None:
+            node = self.diagram_to_place.factory.create(Item.ConceptNode)
+            nodes_dict[str(node)] = []
+            iri_node_str_dict[str(node)] = [node, iri_to_append]
+
+            self.ClassExpressions_unique.append(new_casted_class_expression)
+            self.ClassExpressions_to_nodes_mapping.append(node)
+
             return node
 
         else:
@@ -1087,6 +1165,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                     processed_filler = self.Process_DataRange(new_casted_filler, nodes_dict, edges_dict, iri_node_str_dict, depth+1)
                     nodes_dict[str(node_forall)].append(processed_filler)
                     edges_dict[Item.InputEdge.value].append([processed_filler, node_forall])
+
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(node_forall)
 
                 return node_forall
 
@@ -1118,6 +1199,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
                     nodes_dict[str(node_exists)].append(processed_filler)
                     edges_dict[Item.InputEdge.value].append([processed_filler, node_exists])
+
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(node_exists)
 
                 return node_exists
 
@@ -1155,6 +1239,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                 nodes_dict[str(node_exists)].append(oneofNode)
                 edges_dict[Item.InputEdge.value].append([oneofNode, node_exists])
 
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(node_exists)
+
                 return node_exists
 
             elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.DATA_MAX_CARDINALITY.toString():
@@ -1190,6 +1277,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                     nodes_dict[str(node_cardinality)].append(processed_filler)
                     edges_dict[Item.InputEdge.value].append([processed_filler, node_cardinality])
 
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(node_cardinality)
+
                 return node_cardinality
 
             elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.DATA_MIN_CARDINALITY.toString():
@@ -1221,6 +1311,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                     nodes_dict[str(node_cardinality)].append(processed_filler)
                     edges_dict[Item.InputEdge.value].append([processed_filler, node_cardinality])
 
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(node_cardinality)
+
                 return node_cardinality
 
             elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.DATA_EXACT_CARDINALITY.toString():
@@ -1250,6 +1343,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                     processed_filler = self.Process_DataRange(new_casted_filler, nodes_dict, edges_dict, iri_node_str_dict, depth+1)
                     nodes_dict[str(node_cardinality)].append(processed_filler)
                     edges_dict[Item.InputEdge.value].append([processed_filler, node_cardinality])
+
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(node_cardinality)
 
                 return node_cardinality
 
@@ -1283,6 +1379,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                     processed_filler = self.Process_ClassExpression_2(new_casted_filler, nodes_dict, edges_dict, iri_node_str_dict, depth+1)
                     nodes_dict[str(node_forall)].append(processed_filler)
                     edges_dict[Item.InputEdge.value].append([processed_filler, node_forall])
+
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(node_forall)
 
                 return node_forall
 
@@ -1318,6 +1417,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                                                                       iri_node_str_dict, depth+1)
                     nodes_dict[str(node_exists)].append(processed_filler)
                     edges_dict[Item.InputEdge.value].append([processed_filler, node_exists])
+
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(node_exists)
 
                 return node_exists
 
@@ -1359,6 +1461,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                 nodes_dict[str(node_exists)].append(oneofNode)
                 edges_dict[Item.InputEdge.value].append([oneofNode, node_exists])
 
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(node_exists)
+
                 return node_exists
 
             elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OBJECT_HAS_SELF.toString():
@@ -1380,6 +1485,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                 nodes_dict[str(node_self)] = []
                 nodes_dict[str(node_self)].append(processed_ope[0])
                 edges_dict[Item.InputEdge.value].append([processed_ope[0], node_self])
+
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(node_self)
 
                 return node_self
 
@@ -1415,6 +1523,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                     nodes_dict[str(node_cardinality)].append(processed_filler)
                     edges_dict[Item.InputEdge.value].append([processed_filler, node_cardinality])
 
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(node_cardinality)
+
                 return node_cardinality
 
             elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OBJECT_MIN_CARDINALITY.toString():
@@ -1448,6 +1559,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                                                                       iri_node_str_dict, depth+1)
                     nodes_dict[str(node_cardinality)].append(processed_filler)
                     edges_dict[Item.InputEdge.value].append([processed_filler, node_cardinality])
+
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(node_cardinality)
 
                 return node_cardinality
 
@@ -1484,6 +1598,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                     nodes_dict[str(node_cardinality)].append(processed_filler)
                     edges_dict[Item.InputEdge.value].append([processed_filler, node_cardinality])
 
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(node_cardinality)
+
                 return node_cardinality
 
             elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OBJECT_UNION_OF.toString():
@@ -1491,21 +1608,39 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                 #new_class_expression =self.OWLObjectUnionOf.getClass().cast(class_expression)
                 new_casted_class_expression = cast(self.OWLObjectUnionOf, class_expression)
 
-                #create a new OR node
-                ORnode = self.diagram_to_place.factory.create(Item.UnionNode)
-                iri = self.IRI.create('')
-                iri_node_str_dict[str(ORnode)] = [ORnode, iri]
-                nodes_dict[str(ORnode)] = []
-
                 #get all operands
                 operands = new_casted_class_expression.getOperands()
                 itr = operands.iterator()
 
+                all_operands = []
+                all_processed_operands = []
+
                 while(itr.hasNext()):
                     operand = itr.next()
+                    all_operands.append(operand)
                     processed_operand = self.Process_ClassExpression_2(operand, nodes_dict, edges_dict, iri_node_str_dict, depth+1)
+                    all_processed_operands.append(processed_operand)
+                    #nodes_dict[str(ORnode)].append(processed_operand)
+                    #edges_dict[Item.InputEdge.value].append([processed_operand, ORnode])
+
+                all_oprs_present = self.check_if_all_class_expressions_are_disjoint(all_operands)
+
+                if all_oprs_present:
+                    # create a new black node
+                    ORnode = self.diagram_to_place.factory.create(Item.DisjointUnionNode)
+                else:
+                    # create a new OR node
+                    ORnode = self.diagram_to_place.factory.create(Item.UnionNode)
+                iri = self.IRI.create('')
+                iri_node_str_dict[str(ORnode)] = [ORnode, iri]
+                nodes_dict[str(ORnode)] = []
+
+                for processed_operand in all_processed_operands:
                     nodes_dict[str(ORnode)].append(processed_operand)
                     edges_dict[Item.InputEdge.value].append([processed_operand, ORnode])
+
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(ORnode)
 
                 return ORnode
 
@@ -1527,6 +1662,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                     nodes_dict[str(oneofNode)].append(individualNode)
                     edges_dict[Item.InputEdge.value].append([individualNode, oneofNode])
 
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(oneofNode)
+
                 return oneofNode
 
             elif class_expression.getClassExpressionType().toString() == self.ClassExpressionType.OBJECT_COMPLEMENT_OF.toString():
@@ -1546,6 +1684,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
                 nodes_dict[str(NOTnode)].append(processed_operand)
                 edges_dict[Item.InputEdge.value].append([processed_operand, NOTnode])
+
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(NOTnode)
 
                 return NOTnode
 
@@ -1568,6 +1709,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                     processed_operand = self.Process_ClassExpression_2(operand, nodes_dict, edges_dict, iri_node_str_dict, depth+1)
                     nodes_dict[str(ANDnode)].append(processed_operand)
                     edges_dict[Item.InputEdge.value].append([processed_operand, ANDnode])
+
+                self.ClassExpressions_unique.append(class_expression)
+                self.ClassExpressions_to_nodes_mapping.append(ANDnode)
 
                 return ANDnode
 
@@ -1757,7 +1901,12 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
             nodes_dict[str(processed_super_dpe)].append(processed_sub_dpe)
             edges_dict[Item.InclusionEdge.value].append([processed_sub_dpe, processed_super_dpe])
 
-    def Process_SubClassOF_axioms(self, axioms, nodes_dict, edges_dict, iri_node_str_dict, object_property_domain_or_range):
+    def Process_SubClassOF_axioms(self, axioms, nodes_dict, edges_dict, iri_node_str_dict, object_or_data_property_domain_or_range):
+
+        # 1 Object Property Domain
+        # 2 Object Property Range
+        # 3 Data Property Domain
+        # 4 Data Property Range
 
         for i,axiom in enumerate(axioms):
 
@@ -1765,40 +1914,79 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
             #print('axiom.toString()',axiom.toString())
 
             depth = 0
-            if object_property_domain_or_range == 1:
-                superclass_expression = axiom.getDomain()
-            elif object_property_domain_or_range == 2:
-                superclass_expression = axiom.getRange()
+            if object_or_data_property_domain_or_range in [1, 3]:
+                super_expression = axiom.getDomain()
+            elif object_or_data_property_domain_or_range in [2, 4]:
+                super_expression = axiom.getRange()
             else:
-                superclass_expression = axiom.getSuperClass()
-            casted_superclass_expression = cast(self.OWLClassExpression, superclass_expression)
-            #print('superclass_expression.toString()',superclass_expression.toString())
-            super_root_node = self.Process_ClassExpression_2(casted_superclass_expression, nodes_dict, edges_dict, iri_node_str_dict, depth)
+                super_expression = axiom.getSuperClass()
+
+            if object_or_data_property_domain_or_range == 4:
+                #casted_super_expression = cast(self.OWLDataRange, super_expression)
+                super_root_node = self.Process_DataRange(super_expression, nodes_dict, edges_dict, iri_node_str_dict, depth)
+            else:
+                #casted_super_expression = cast(self.OWLClassExpression, super_expression)
+                super_root_node = self.Process_ClassExpression_2(super_expression, nodes_dict, edges_dict,
+                                                                 iri_node_str_dict, depth)
 
             depth = 0
-            if object_property_domain_or_range in [1, 2]:
+            if object_or_data_property_domain_or_range in [1, 2]:
 
                 sub_op_expression = axiom.getProperty()
-                casted_op_expression = cast(self.OWLObjectPropertyExpression, sub_op_expression)
-                #print('sub_op_expression.toString()', sub_op_expression.toString())
-                sub_root_node_ope = self.Process_ObjectPropertyExpression_2(casted_op_expression, nodes_dict, iri_node_str_dict, depth)
+                #casted_op_expression = cast(self.OWLObjectPropertyExpression, sub_op_expression)
+                sub_root_node_ope = self.Process_ObjectPropertyExpression_2(sub_op_expression, nodes_dict, iri_node_str_dict, depth)
 
                 iri_to_append = self.IRI.create('')
-                if object_property_domain_or_range == 1:
+                if object_or_data_property_domain_or_range == 1:
                     sub_root_node = self.diagram_to_place.factory.create(Item.DomainRestrictionNode)
                 else:
                     sub_root_node = self.diagram_to_place.factory.create(Item.RangeRestrictionNode)
                 nodes_dict[str(sub_root_node)] = [sub_root_node_ope[0]]
                 edges_dict[Item.InputEdge.value].append([sub_root_node_ope[0], sub_root_node])
                 iri_node_str_dict[str(sub_root_node)] = [sub_root_node, iri_to_append]
+            elif object_or_data_property_domain_or_range in [3, 4]:
+
+                sub_dp_expression = axiom.getProperty()
+                #casted_dp_expression = cast(self.OWLDataPropertyExpression, sub_dp_expression)
+                sub_root_node_dpe = self.Process_DataPropertyExpression_2(sub_dp_expression, nodes_dict, iri_node_str_dict, depth)
+
+                iri_to_append = self.IRI.create('')
+                if object_or_data_property_domain_or_range == 3:
+                    sub_root_node = self.diagram_to_place.factory.create(Item.DomainRestrictionNode)
+                else:
+                    sub_root_node = self.diagram_to_place.factory.create(Item.RangeRestrictionNode)
+                nodes_dict[str(sub_root_node)] = [sub_root_node_dpe]
+                edges_dict[Item.InputEdge.value].append([sub_root_node_dpe, sub_root_node])
+                iri_node_str_dict[str(sub_root_node)] = [sub_root_node, iri_to_append]
             else:
 
                 sub_cl_expression = axiom.getSubClass()
-                casted_subclass_expression = cast(self.OWLClassExpression, sub_cl_expression)
-                sub_root_node = self.Process_ClassExpression_2(casted_subclass_expression, nodes_dict, edges_dict, iri_node_str_dict, depth)
+                #casted_subclass_expression = cast(self.OWLClassExpression, sub_cl_expression)
+                sub_root_node = self.Process_ClassExpression_2(sub_cl_expression, nodes_dict, edges_dict, iri_node_str_dict, depth)
 
             nodes_dict[str(super_root_node)].append(sub_root_node)
             edges_dict[Item.InclusionEdge.value].append([sub_root_node, super_root_node])
+
+            #if object_or_data_property_domain_or_range in [1, 2, 3, 4]:
+
+            ExFallCar_node = None
+            class_expression_OR_value_domain_node = None
+
+            if ('DomainRestrictionNode:' in str(sub_root_node)) or ('RangeRestrictionNode:' in str(sub_root_node)):
+                ExFallCar_node = sub_root_node
+                class_expression_OR_value_domain_node = super_root_node
+            elif ('DomainRestrictionNode:' in str(super_root_node)) or (
+                'RangeRestrictionNode:' in str(super_root_node)):
+                ExFallCar_node = super_root_node
+                class_expression_OR_value_domain_node = sub_root_node
+            else:
+                pass
+
+            if ExFallCar_node is not None:
+                if str(ExFallCar_node) not in self.AttributesANDRoles_to_DomainANDRange_mapping.keys():
+                    self.AttributesANDRoles_to_DomainANDRange_mapping[str(ExFallCar_node)] = []
+                self.AttributesANDRoles_to_DomainANDRange_mapping[str(ExFallCar_node)].append(
+                    class_expression_OR_value_domain_node)
 
     def Process_EquivalentClasses_axioms(self, axioms, nodes_dict, edge_dict, iri_node_str_dict):
 
@@ -1850,6 +2038,126 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                         # if both are not placed, randomly place one below the other
                         nodes_dict[str(ec1)].append(ec2)
 
+
+                    if ('DomainRestrictionNode:' in str(ec1)) or (
+                        'RangeRestrictionNode:' in str(ec1)):
+                        ExFallCar_node = ec1
+                        class_expression_node = ec2
+                    elif ('DomainRestrictionNode:' in str(ec2)) or (
+                        'RangeRestrictionNode:' in str(ec2)):
+                        ExFallCar_node = ec2
+                        class_expression_node = ec1
+                    else:
+                        ExFallCar_node = None
+                        class_expression_node = None
+
+                    if ExFallCar_node is not None:
+                        if str(ExFallCar_node) not in self.AttributesANDRoles_to_DomainANDRange_mapping.keys():
+                            self.AttributesANDRoles_to_DomainANDRange_mapping[str(ExFallCar_node)] = []
+                        self.AttributesANDRoles_to_DomainANDRange_mapping[str(ExFallCar_node)].append(
+                            class_expression_node)
+
+    def Process_EquivalentObjectANDDataProperties_axioms(self, axioms, nodes_dict, edge_dict, iri_node_str_dict, entity_type):
+
+        for i, axiom in enumerate(axioms):
+
+            equivalent_entities = []
+
+            entity_expressions = axiom.getProperties()
+
+            itr_entity_expressions = entity_expressions.iterator()
+            while itr_entity_expressions.hasNext():
+                ee = itr_entity_expressions.next()
+                depth = 0
+
+                if entity_type == 0:
+                    #casted_ee = cast(self.OWLObjectPropertyExpression, ee)
+                    equivalent_root_node = self.Process_ObjectPropertyExpression_2(ee, nodes_dict, edge_dict,
+                                                                                   iri_node_str_dict, depth)
+                else:
+                    #casted_ee = cast(self.OWLDataPropertyExpression, ee)
+                    equivalent_root_node = self.Process_DataPropertyExpression_2(ee, nodes_dict, edge_dict,
+                                                                                   iri_node_str_dict, depth)
+
+                equivalent_entities.append(equivalent_root_node)
+
+            for i in range(0, len(equivalent_entities) - 1):
+                ee1 = equivalent_entities[i]
+                if str(ee1) not in nodes_dict.keys():
+                    nodes_dict[str(ee1)] = []
+
+                for j in range(i + 1, len(equivalent_entities)):
+                    ee2 = equivalent_entities[j]
+                    if str(ee2) not in nodes_dict.keys():
+                        nodes_dict[str(ee2)] = []
+
+                    edge_dict[Item.EquivalenceEdge.value].append([ee1, ee2])
+                    nodes_dict[str(ee1)].append(ee2)
+
+    def Process_DisjointClasses_axioms_2(self, nodes_dict, edge_dict, iri_node_str_dict):
+
+        #print('Process_DisjointClasses_axioms_2')
+
+        for ax_no, dis_ces in enumerate(self.disjoint_class_expressions_for_all_DisjointClassesAxioms):
+            if ax_no in self.disjoint_class_expressionsNos_for_all_DisjointClassesAxioms_to_be_ignored:
+                continue
+            else:
+                disjoint_classes = []
+                dtcls_placed = []
+
+                #print('len(dis_ces)',len(dis_ces))
+                #print('dis_ces',dis_ces)
+
+                for ce in dis_ces:
+                    depth = 0
+                    nodes_dict_copy = nodes_dict.copy()
+
+                    disjoint_root_node = self.Process_ClassExpression_2(ce, nodes_dict, edge_dict, iri_node_str_dict,
+                                                                        depth)
+                    disjoint_classes.append(disjoint_root_node)
+
+                    if str(disjoint_root_node) in nodes_dict_copy.keys():
+                        dtcls_placed.append(True)
+                    else:
+                        dtcls_placed.append(False)
+
+                for i in range(0, len(disjoint_classes) - 1):
+
+                    dc1 = disjoint_classes[i]
+                    if str(dc1) not in nodes_dict.keys():
+                        nodes_dict[str(dc1)] = []
+                    cl1_placed = dtcls_placed[i]
+
+                    for j in range(i + 1, len(disjoint_classes)):
+
+                        dc2 = disjoint_classes[j]
+
+                        if str(dc2) not in nodes_dict.keys():
+                            nodes_dict[str(dc2)] = []
+                        cl2_placed = dtcls_placed[j]
+
+                        not_node = self.diagram_to_place.factory.create(Item.ComplementNode)
+                        iri_node_str_dict[str(not_node)] = [not_node, self.IRI.create('')]
+                        nodes_dict[str(not_node)] = [dc1, dc2]
+
+                        if cl1_placed and cl2_placed:
+                            # if both are placed ->
+                            edge_dict[Item.InputEdge.value].append([dc1, not_node])
+                            edge_dict[Item.InclusionEdge.value].append([dc2, not_node])
+
+                        elif cl1_placed and (not cl2_placed):
+                            edge_dict[Item.InputEdge.value].append([dc2, not_node])
+                            edge_dict[Item.InclusionEdge.value].append([dc1, not_node])
+
+                        elif (not cl1_placed) and cl2_placed:
+                            edge_dict[Item.InputEdge.value].append([dc1, not_node])
+                            edge_dict[Item.InclusionEdge.value].append([dc2, not_node])
+
+                        elif (not cl1_placed) and (not cl2_placed):
+                            # if both are not placed
+                            edge_dict[Item.InputEdge.value].append([dc1, not_node])
+                            edge_dict[Item.InclusionEdge.value].append([dc2, not_node])
+
     def Process_DisjointClasses_axioms(self, axioms, nodes_dict, edge_dict, iri_node_str_dict):
 
         for i, axiom in enumerate(axioms):
@@ -1873,13 +2181,16 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                     dtcls_placed.append(False)
 
             for i in range(0, len(disjoint_classes) - 1):
+
                 dc1 = disjoint_classes[i]
                 if str(dc1) not in nodes_dict.keys():
                     nodes_dict[str(dc1)] = []
                 cl1_placed = dtcls_placed[i]
 
                 for j in range(i + 1, len(disjoint_classes)):
+
                     dc2 = disjoint_classes[j]
+
                     if str(dc2) not in nodes_dict.keys():
                         nodes_dict[str(dc2)] = []
                     cl2_placed = dtcls_placed[j]
@@ -1905,6 +2216,52 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                         # if both are not placed
                         edge_dict[Item.InputEdge.value].append([dc1, not_node])
                         edge_dict[Item.InclusionEdge.value].append([dc2, not_node])
+
+    def Process_DisjointObjectANDDataProperties_axioms(self, axioms, nodes_dict, edge_dict, iri_node_str_dict, entity_type):
+
+        for i, axiom in enumerate(axioms):
+
+            disjoint_entities = []
+
+            entity_expressions = axiom.getProperties()
+
+            itr_entity_expressions = entity_expressions.iterator()
+            while itr_entity_expressions.hasNext():
+                de = itr_entity_expressions.next()
+                depth = 0
+
+                if entity_type == 0:
+                    #casted_de = cast(self.OWLObjectPropertyExpression, de)
+                    disjoint_root_node = self.Process_ObjectPropertyExpression_2(de, nodes_dict, edge_dict,
+                                                                                   iri_node_str_dict, depth)
+                else:
+                    #casted_de = cast(self.OWLDataPropertyExpression, de)
+                    disjoint_root_node = self.Process_DataPropertyExpression_2(de, nodes_dict, edge_dict,
+                                                                                   iri_node_str_dict, depth)
+
+                disjoint_entities.append(disjoint_root_node)
+
+            for i in range(0, len(disjoint_entities) - 1):
+                de1 = disjoint_entities[i]
+                if str(de1) not in nodes_dict.keys():
+                    nodes_dict[str(de1)] = []
+
+                for j in range(i + 1, len(disjoint_entities)):
+                    de2 = disjoint_entities[j]
+                    if str(de2) not in nodes_dict.keys():
+                        nodes_dict[str(de2)] = []
+
+                    not_node = self.diagram_to_place.factory.create(Item.ComplementNode)
+                    iri_node_str_dict[str(not_node)] = [not_node, self.IRI.create('')]
+                    nodes_dict[str(not_node)] = [de1, de2]
+
+                    # if both are placed ->
+                    edge_dict[Item.InputEdge.value].append([de1, not_node])
+                    edge_dict[Item.InclusionEdge.value].append([de2, not_node])
+
+    def Process_DisjointUnion_axioms(self, axioms, nodes_dict, edge_dict, iri_node_str_dict):
+
+        pass
 
     def fetch_ontology_from_file(self,filename_inp):
 
@@ -2182,6 +2539,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         return graph_dict_nodes_disjoint
 
+    #not used
     def create_graph_equivalent_classes(self, all_commands, graph_dict_edges, iri_node_str_dict):
 
         graph_dict_nodes_equivalent = dict()
@@ -2231,16 +2589,26 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
     def get_dept_width_height_and_repeat_for_children(self, graph, dwh_dict, node_str, current_depth, stack_trace):
 
         #print('>>> dwh_of_nodes_dict')
-        print('node_str',node_str,'current_depth',current_depth)
+        #print('node_str',node_str,'current_depth',current_depth)
         #for key in dwh_dict.keys():
         #    print(key, ' - ', dwh_dict[key])
         #print('>>> dwh_of_nodes_dict END')
 
         if node_str in dwh_dict.keys():
-            print('node_str in dwh_dict.keys()')
+            #print('node_str in dwh_dict.keys()')
             dwh_dict[node_str][0].add(current_depth)
         else:
-            print('children = graph[node_str]')
+            #print('children = graph[node_str]')
+
+            minimum_width = 1
+            if node_str in self.attributes_for_classexpressions.keys():
+                total_number_of_ExFallCar_nodes = self.attributes_for_classexpressions[node_str][-1]
+                #print('total_number_of_ExFallCar_nodes',total_number_of_ExFallCar_nodes)
+                number_of_lines_on_one_side = math.ceil(total_number_of_ExFallCar_nodes/2)
+                number_of_groups = math.ceil(number_of_lines_on_one_side/4)
+                minimum_width = 2*number_of_groups+1
+                #print('node_str',node_str)
+                #print('     minimum_width', minimum_width)
 
             children = graph[node_str]
 
@@ -2249,7 +2617,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                 depths = set()
                 depths.add(current_depth)
                 values_to_set.append(depths)
-                values_to_set.append(1)
+                values_to_set.append([minimum_width, 1])
                 values_to_set.append(1)
             else:
                 for child in children:
@@ -2265,7 +2633,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                     #if child not in stack_trace:
                     if str(child) in dwh_dict.keys():
                         values = dwh_dict[str(child)]
-                        width_child = values[1]
+                        width_child = max(values[1])
                         summation_width = summation_width + width_child
 
                         height_child = values[2]
@@ -2275,7 +2643,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                 depth_values = set()
                 depth_values.add(current_depth)
                 values_to_set.append(depth_values)
-                values_to_set.append(summation_width)
+                values_to_set.append([minimum_width, summation_width])
                 values_to_set.append(summation_height + 1)
 
             dwh_dict[node_str] = values_to_set
@@ -2290,9 +2658,8 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         return [None, None]
 
+    # not used
     def getfree_positions(self, pos_type, from_pos, number_of_positions, occupied_positions):
-
-        #occupied_positions = self.occupied_positions_xy.values()
 
         if from_pos is not None:
             fpx = from_pos[0]
@@ -2437,31 +2804,55 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         return now_placed_classes
 
-    def get_free_points_around_a_point(self, center_point):
+    def check_if_point_in_occupied_rectangles(self, point):
+
+        X_point = point[0]
+        Y_point = point[1]
+
+        for rect in self.occupied_rectangles:
+            #[max_X, max_Y, min_X, min_Y]
+            max_X = rect[0]
+            max_Y = rect[1]
+            min_X = rect[2]
+            min_Y = rect[3]
+
+            if X_point <=max_X and X_point >=min_X:
+                if Y_point <=max_Y and Y_point >=min_Y:
+                    return True
+
+        return False
+
+    def get_free_points_around_a_point_at_a_specific_distance(self, center_point, dist, place_role):
 
         #print('>>>      get_free_points_around_a_point')
 
         #print('center_point',center_point)
 
-        x_center_point = int(center_point[0]/150)
-        y_center_point = int(center_point[1]/200)
+
+        x_center_point = int(center_point[0] / 150)
+        y_center_point = int(center_point[1] / 200)
 
         generated_points = []
 
-        dist = 9
+        # for i in range((int(x_center_point/300)-dist), (int(x_center_point/300)+dist)):
+        for i in range((x_center_point - dist), (x_center_point + dist)):
+            # for j in range((int(y_center_point / 200) - dist), (int(y_center_point / 200) + dist)):
+            for j in range((y_center_point - dist), (y_center_point + dist)):
 
-        while(len(generated_points) == 0 or dist<10):
-            #for i in range((int(x_center_point/300)-dist), (int(x_center_point/300)+dist)):
-            for i in range((x_center_point - dist), (x_center_point + dist)):
-                #for j in range((int(y_center_point / 200) - dist), (int(y_center_point / 200) + dist)):
-                for j in range((y_center_point - dist), (y_center_point + dist)):
-                    #point = [300*i, 200*j]
-                    point = [150 * i, 200 * j]
-                    if point in self.occupied_positions_xy.values():
-                        pass
-                    else:
-                        generated_points.append(point)
-            dist = dist+1
+                point = [150 * i, 100 * j]
+
+                if place_role is False:
+                    if (point[1] % 200 != 0):
+                        continue
+                else:
+                    if (point[0] % 300 == 0 or point[1] % 200 == 0):
+                        continue
+
+                if (point in self.occupied_positions_xy.values()) or (
+                        self.check_if_point_in_occupied_rectangles(point)):
+                    pass
+                else:
+                    generated_points.append(point)
 
         generated_points_dict = dict()
 
@@ -2472,8 +2863,65 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                 generated_points_dict[y_gp] = []
             generated_points_dict[y_gp].append(x_gp)
 
-        #for key in sorted(generated_points_dict.keys()):
-            #print(key,' ',generated_points_dict[key])
+        if place_role:
+            for role in sorted(generated_points_dict.keys()):
+                gps = generated_points_dict[role]
+                #print('role-',role)
+                #for g in gps:
+                #    print('g',g)
+
+        #print('>>>      get_free_points_around_a_point END')
+
+        return generated_points
+
+    def get_free_points_around_a_point(self, center_point, dist, place_role):
+
+        #print('>>>      get_free_points_around_a_point')
+
+        #print('center_point',center_point)
+
+
+        x_center_point = int(center_point[0] / 150)
+        y_center_point = int(center_point[1] / 200)
+
+        generated_points = []
+
+        while (len(generated_points) == 0 or dist < 10):
+            # for i in range((int(x_center_point/300)-dist), (int(x_center_point/300)+dist)):
+            for i in range((x_center_point - dist), (x_center_point + dist)):
+                # for j in range((int(y_center_point / 200) - dist), (int(y_center_point / 200) + dist)):
+                for j in range((y_center_point - dist), (y_center_point + dist)):
+
+                    if place_role is False:
+                        point = [150 * i, 200 * j]
+                    else:
+                        point = [150 * i, 100 * j]
+                        if (point[0] % 300 == 0 or point[1] % 200 == 0):
+                            pass
+
+                    if (point in self.occupied_positions_xy.values()) or (
+                    self.check_if_point_in_occupied_rectangles(point)):
+                        pass
+                    else:
+                        generated_points.append(point)
+            dist = dist + 1
+
+        generated_points_dict = dict()
+
+        for gp in generated_points:
+            x_gp = gp[0]
+            y_gp = gp[1]
+            if y_gp not in generated_points_dict.keys():
+                generated_points_dict[y_gp] = []
+            generated_points_dict[y_gp].append(x_gp)
+
+
+        if place_role:
+            for role in sorted(generated_points_dict.keys()):
+                gps = generated_points_dict[role]
+                print('role-',role)
+                for g in gps:
+                    print('g',g)
 
         #print('>>>      get_free_points_around_a_point END')
 
@@ -2524,14 +2972,115 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
             return best_point
 
-    def place_unplaced_node_aided_by_anchors(self, unplaced_node_str, children, anchors_for_unplaced_nodes, iri_node_str_dict):
+    def compute_optimized_point_using_possible_points_2(self, list_of_anchor_points, place_role=False):
 
-        possible_points_union_anchor = []
+        if len(list_of_anchor_points) == 0:
+            return None
+
+
+        #print('place_role',place_role)
+        #print('list_of_anchor_points',list_of_anchor_points)
+        #print('list_of_anchor_points[:]', list_of_anchor_points[:])
+
+        max_X = 0.0
+        max_Y = 0.0
+
+        for p in list_of_anchor_points:
+            max_X = max(max_X, p[0])
+            max_Y = max(max_Y, p[1])
+
+        min_X = max_X
+        min_Y = max_Y
+
+        for p in list_of_anchor_points:
+            min_X = min(min_X, p[0])
+            min_Y = min(min_Y, p[1])
+
+        min_X = math.floor(int(min_X)/150)
+        min_X = min_X * 150
+        max_X = math.ceil(int(max_X) / 150)
+        max_X = max_X * 150
+
+        min_Y = math.floor(int(min_Y) / 100)
+        min_Y = min_Y * 100
+        max_Y = math.ceil(int(max_Y) / 100)
+        max_Y = max_Y * 100
+
+        #print('min_X',min_X)
+        #print('min_Y',min_Y)
+        #print('max_X',max_X)
+        #print('max_Y',max_Y)
+
+        all_vals_X = []
+        all_vals_Y = []
+        x_itr = []
+        y_itr = []
+        for x in range(min_X, max_X+1, 150):
+            #print('x',x)
+            if place_role and (x % 300 == 0):
+                continue
+
+            sum_X = 0.0
+            for p in list_of_anchor_points:
+                sum_X = sum_X + abs(p[0] - x)
+            #print('sum_X', sum_X)
+            all_vals_X.append(sum_X)
+            x_itr.append(x)
+
+        for y in range(min_Y, max_Y+1, 100):
+        #for y in range(-1000, max_Y + 1, 100):
+            #print('y', y)
+
+            if (place_role is False) and (y % 200 != 0):
+                continue
+            if (place_role is True) and (y % 200 == 0):
+                continue
+
+            sum_Y = 0.0
+            for p in list_of_anchor_points:
+                sum_Y = sum_Y + abs(p[1] - y)
+            #print('sum_Y', sum_Y)
+            all_vals_Y.append(sum_Y)
+            y_itr.append(y)
+
+        #print('all_vals_X', all_vals_X)
+        #print('all_vals_Y', all_vals_Y)
+
+        if len(all_vals_X) == 0:
+            all_vals_X.append(list_of_anchor_points[0][0])
+            x_itr.append(list_of_anchor_points[0][0])
+        if len(all_vals_Y) == 0:
+            all_vals_Y.append(list_of_anchor_points[0][1])
+            y_itr.append(list_of_anchor_points[0][1])
+
+        min_X = x_itr[all_vals_X.index(min(all_vals_X))]
+        min_Y = y_itr[all_vals_Y.index(min(all_vals_Y))]
+
+        #if (([px, py]) in self.occupied_positions_xy.values()) or (self.check_if_point_in_occupied_rectangles([px, py])):
+
+        generated_points = []
+        dist = 1
+        while(len(generated_points)==0):
+            generated_points = self.get_free_points_around_a_point_at_a_specific_distance([min_X, min_Y], dist, place_role)
+            dist = dist+1
+
+        point_to_return = generated_points[0]
+
+        #print('return_values-',point_to_return)
+
+        return point_to_return
+
+    def place_unplaced_node_aided_by_anchors(self, unplaced_node_str, children, anchors_for_unplaced_nodes, iri_node_str_dict, place_role=False):
+
+        if place_role is False:
+            if 'RoleNode:' in unplaced_node_str:
+                place_role = True
+
         anchors_of_nd = anchors_for_unplaced_nodes[unplaced_node_str]
 
-        print('>>>      place_unplaced_node_aided_by_anchors')
-        print('      unplaced_node_str',unplaced_node_str)
-        print('      anchors_of_nd', anchors_of_nd)
+        #print('>>>      place_unplaced_node_aided_by_anchors')
+        #print('      unplaced_node_str',unplaced_node_str)
+        #print('      anchors_of_nd', anchors_of_nd)
 
         # if len of anchor is 0, take the anchors of the children
         if len(anchors_of_nd) == 0:
@@ -2541,15 +3090,24 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                 anchor_of_child = anchors_for_unplaced_nodes[str(c)]
                 anchors_of_nd.extend(anchor_of_child)
 
+        dist = 20
+
+        possible_points_union_anchor = []
+        weighted_average_point = None
+        all_anchor_points = []
+
         for anchor in anchors_of_nd:
             #print('anchor',anchor)
             pos_anchor = self.occupied_positions_xy[anchor]
-            pts_around_anchor = self.get_free_points_around_a_point(pos_anchor)
-            temp = [pos_anchor]
-            temp.extend(pts_around_anchor)
-            possible_points_union_anchor.append(temp)
+            all_anchor_points.append(pos_anchor)
+            #pts_around_anchor = self.get_free_points_around_a_point(pos_anchor,dist,place_role)
+            #temp = [pos_anchor]
+            #temp.extend(pts_around_anchor)
+            #possible_points_union_anchor.append(temp)
 
-        optimized_point = self.compute_optimized_point_using_possible_points(possible_points_union_anchor)
+
+        optimized_point = self.compute_optimized_point_using_possible_points_2(all_anchor_points,place_role)
+        #optimized_point = self.compute_optimized_point_using_possible_points(possible_points_union_anchor)
 
         #print('optimized_point', optimized_point)
 
@@ -2605,8 +3163,8 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
         for k in key_to_remove:
             del sub_graph[k]
 
-        for und in sub_graph.keys():
-            print('und*',und,' ',sub_graph[und])
+        #for und in sub_graph.keys():
+            #print('und*',und,' ',sub_graph[und])
 
         #print('')
 
@@ -2637,7 +3195,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                 if parent_placed is False:
                     if True not in children_placed:
                         #nothing can be done in this iteration
-                        print(und,' -nothing can be done in this iteration')
+                        #print(und,' -nothing can be done in this iteration')
                         pass
                     else:
                         # make all the placed children as anchors
@@ -2662,7 +3220,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                                 to_place.add(str(c))
 
             for t in to_place:
-                print('*** 2nd attempt ',t)
+                #print('*** 2nd attempt ',t)
                 children_of_t = sub_graph[t]
                 self.place_unplaced_node_aided_by_anchors(t, children_of_t, anchors_for_unplaced_nodes,
                                                                 iri_node_str_dict)
@@ -2687,7 +3245,8 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                 if str(c) not in self.occupied_positions_xy.keys():
                     still_unplaced.add(str(c))
 
-        print('>>> still_unplaced',still_unplaced)
+
+        #print('>>> still_unplaced',still_unplaced)
 
         return still_unplaced
 
@@ -2803,25 +3362,41 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
     def place_nodes_in_diagram(self, str_node, dwh_of_nodes_dict, iri_node_str_dict, graph_dict, sp, depth):
 
         #print('str(type(str_node))',str(type(str_node)))
-        print('place_nodes_depth', depth)
+        #print('place_nodes_depth', depth)
 
         dwh_values_of_p = dwh_of_nodes_dict[str_node]
 
         depths = dwh_values_of_p[0]
-        width = dwh_values_of_p[1]
-        height = dwh_values_of_p[2]
+        min_and_summation_width = dwh_values_of_p[1]
+        min_width = min_and_summation_width[0]
+        #summation_width = min_and_summation_width[1]
+        #height = dwh_values_of_p[2]
+
+        children = graph_dict[str_node]
+
+        children_sp = sp
+        children_width = 0
+
+        for c in children:
+            # recursive function
+            if str(c) not in self.occupied_positions_xy.keys():
+                width_of_last_node = self.place_nodes_in_diagram(str(c), dwh_of_nodes_dict, iri_node_str_dict,
+                                                                 graph_dict, children_sp, depth + 1)
+                children_sp = children_sp + width_of_last_node
+                children_width = children_width + width_of_last_node
+
+        width_to_set = max(min_width, children_width)
 
         if str_node not in self.occupied_positions_xy.keys():
 
             node_and_iri = iri_node_str_dict[str_node]
             node = node_and_iri[0]
-            iri = node_and_iri[1].toString()
 
             # compute where to place
             depth_to_set = max(depths)
             # new_x = sp * 300 + 300 * ((width / 2))
-            new_x = 300 * (sp + (width / 2))
-            new_y = depth_to_set * 200
+            new_x = 300.0 * (sp + (width_to_set / 2))
+            new_y = depth_to_set * 200.0
 
             # place p
             snapToGrid = self.session.action('toggle_grid').isChecked()
@@ -2834,25 +3409,11 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
             self.occupied_positions_xy[str_node] = [new_x, new_y]
 
-        children = graph_dict[str_node]
+            return width_to_set
+        else:
+            return 0
 
-        children_sp = sp
-        children_width = 0
-
-        for c in children:
-            # recursive function
-            if str(c) not in self.occupied_positions_xy.keys():
-                width_of_last_node = self.place_nodes_in_diagram(str(c), dwh_of_nodes_dict, iri_node_str_dict, graph_dict, children_sp, depth+1)
-                children_sp = children_sp + width_of_last_node
-                children_width = children_width + width_of_last_node
-        """
-            return min(width,children_width)
-            return max(children_width,1)
-        """
-        return width
-        #return max(min(width,children_width),1)
-
-    def place_nodes_in_diagram_2(self, unplaced_nodes, graph_nodes, graph_edges, iri_node_str_dict):
+    def place_nodes_in_diagram_3(self, unplaced_nodes, graph_nodes, graph_edges, iri_node_str_dict):
 
         #for gn in graph_nodes:
             #print('gn',gn)
@@ -2869,8 +3430,8 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         anchors_for_unplaced_nodes = self.identify_anchors_for_unplaced_nodes(unplaced_nodes, graph_nodes)
 
-        for a in anchors_for_unplaced_nodes:
-            print('a',a)
+        #for a in anchors_for_unplaced_nodes:
+            #print('a',a)
 
         unplaced_nodes_for_graph = set()
 
@@ -2880,11 +3441,629 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
             unplaced_nodes_for_graph = unplaced_nodes_for_graph.union(unplaced_nodes_for_subgraph)
 
         for un in unplaced_nodes_for_graph:
-            print('still_unplaced - ',un)
+            if len(un) > 0:
+                print('still_unplaced - ',un)
+
+    #not used
+    def get_optimized_point_for_list_of_points(self, list_of_points):
+
+        return None
+
+    def generate_points_around_role(self, num_pts, role_point, pts_type):
+
+        generated_points = []
+
+        if pts_type == 1:
+
+            if num_pts <= 2:
+                if num_pts == 1:
+                    generated_points.extend(self.generate_points_around_role(1, role_point, 'x'))
+                else:
+                    generated_points.extend(self.generate_points_around_role(1, role_point, 'x'))
+                    generated_points.extend(self.generate_points_around_role(1, role_point, 'y'))
+            elif num_pts>2 and num_pts<=10:
+
+                if num_pts <= 5:#3-5
+
+                    if num_pts == 3:
+
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'x'))
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'y'))
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'p'))
+
+                    elif num_pts == 4:
+
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'x'))
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'y'))
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'p'))
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'q'))
+
+                    else:
+
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'e'))
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'f'))
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 't'))
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'q'))
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'u'))
+
+                else:#6-10
+
+                    if num_pts == 6:
+
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'p'))
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'q'))
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'r'))
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 's'))
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 't'))
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'u'))
+
+                    elif num_pts == 10:
+
+                        generated_points.extend(self.generate_points_around_role(5, role_point, 'a'))
+                        generated_points.extend(self.generate_points_around_role(5, role_point, 'c'))
+
+                    else:#7,8,9,10
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'x'))
+                        generated_points.extend(self.generate_points_around_role(1, role_point, 'y'))
+
+                        if num_pts == 7:
+
+                            generated_points.extend(self.generate_points_around_role(1, role_point, 'e'))
+                            generated_points.extend(self.generate_points_around_role(1, role_point, 'f'))
+                            generated_points.extend(self.generate_points_around_role(1, role_point, 't'))
+                            generated_points.extend(self.generate_points_around_role(1, role_point, 'q'))
+                            generated_points.extend(self.generate_points_around_role(1, role_point, 'u'))
+
+                        elif num_pts == 8:
+
+                            generated_points.extend(self.generate_points_around_role(1, role_point, 'p'))
+                            generated_points.extend(self.generate_points_around_role(1, role_point, 'q'))
+                            generated_points.extend(self.generate_points_around_role(1, role_point, 'r'))
+                            generated_points.extend(self.generate_points_around_role(1, role_point, 's'))
+                            generated_points.extend(self.generate_points_around_role(1, role_point, 't'))
+                            generated_points.extend(self.generate_points_around_role(1, role_point, 'u'))
+
+                        elif num_pts == 9:
+                            generated_points.extend(self.generate_points_around_role(5, role_point, 'c'))
+
+                            generated_points.extend(self.generate_points_around_role(1, role_point, 'e'))
+                            generated_points.extend(self.generate_points_around_role(1, role_point, 'f'))
+
+            elif num_pts>10 and num_pts<=12:
+
+                generated_points.extend(self.generate_points_around_role(5, role_point, 'a'))
+                generated_points.extend(self.generate_points_around_role(5, role_point, 'c'))
+
+                if num_pts == 11:
+                    generated_points.extend(self.generate_points_around_role(1, role_point, 'x'))
+                else:
+                    generated_points.extend(self.generate_points_around_role(1, role_point, 'x'))
+                    generated_points.extend(self.generate_points_around_role(1, role_point, 'y'))
+
+        elif pts_type == 2:
+
+            if num_pts<=5:
+
+                generated_points.extend(self.generate_points_around_role(num_pts, role_point, 'a'))
+
+            elif num_pts>5 and num_pts<=10:
+
+                generated_points.extend(self.generate_points_around_role(5, role_point, 'a'))
+                generated_points.extend(self.generate_points_around_role(num_pts-5, role_point, 'c'))
+
+            elif num_pts>10 and num_pts<=15:
+
+                generated_points.extend(self.generate_points_around_role(5, role_point, 'a'))
+                generated_points.extend(self.generate_points_around_role(5, role_point, 'c'))
+                generated_points.extend(self.generate_points_around_role(num_pts - 10, role_point, 'b'))
+
+        elif pts_type=='a':
+
+            st_X = role_point[0] - 80
+            st_Y = role_point[1] - 50
+
+            while num_pts != 0:
+                new_pt = [st_X, st_Y]
+                generated_points.append(new_pt)
+                st_X = st_X + 40
+                num_pts = num_pts - 1
+
+        elif pts_type=='b':
+
+            st_X = role_point[0] - 80
+            st_Y = role_point[1]
+
+            while num_pts != 0:
+                new_pt = [st_X, st_Y]
+                generated_points.append(new_pt)
+                st_X = st_X + 40
+                num_pts = num_pts - 1
+
+        elif pts_type=='c':
+
+            st_X = role_point[0] - 80
+            st_Y = role_point[1] + 50
+
+            while num_pts != 0:
+                new_pt = [st_X, st_Y]
+                generated_points.append(new_pt)
+                st_X = st_X + 40
+                num_pts = num_pts - 1
+
+        elif pts_type in ['x','y','e','f','p','q','r','s','t','u']:
+            if pts_type == 'x':
+
+                st_X = role_point[0] - 80
+                st_Y = role_point[1]
+
+            elif pts_type == 'y':
+
+                st_X = role_point[0] + 80
+                st_Y = role_point[1]
+
+            elif pts_type == 'e':
+
+                st_X = role_point[0]-40
+                st_Y = role_point[1]-50
+
+            elif pts_type == 'f':
+
+                st_X = role_point[0]+40
+                st_Y = role_point[1]-50
+
+            elif pts_type == 'p':
+
+                st_X = role_point[0]
+                st_Y = role_point[1]-50
+
+            elif pts_type == 'q':
+
+                st_X = role_point[0]
+                st_Y = role_point[1]+50
+
+            elif pts_type == 'r':
+
+                st_X = role_point[0]-80
+                st_Y = role_point[1]-50
+
+            elif pts_type == 's':
+
+                st_X = role_point[0]+80
+                st_Y = role_point[1]-50
+
+            elif pts_type == 't':
+
+                st_X = role_point[0]-80
+                st_Y = role_point[1]+50
+
+            elif pts_type == 'u':
+
+                st_X = role_point[0]+80
+                st_Y = role_point[1]+50
+
+            new_pt = [st_X, st_Y]
+            generated_points.append(new_pt)
+
+        else:
+            pass
+
+        return generated_points
+
+    def place_attributes_and_related_nodes(self):
+
+        list_of_nodes_to_place = []
+
+        for str_class_expression in self.attributes_for_classexpressions.keys():
+
+            if str_class_expression not in self.occupied_positions_xy.keys():
+                continue
+
+            pos_str_class_expression = self.occupied_positions_xy[str_class_expression]
+            posX_str_CE = pos_str_class_expression[0]
+            posY_str_CE = pos_str_class_expression[1]
+
+            #print(str_class_expression,' - pos_str_class_expression',pos_str_class_expression)
+
+            attributes = self.attributes_for_classexpressions[str_class_expression]
+
+            all_half_lines = []
+
+            for i,atr in enumerate(attributes):
+
+                #print('atr',atr)
+
+                if i!=len(attributes)-1:
+
+                    DomainANDRange_nodes = self.AttributesANDRoles_to_DomainANDRange_mapping[str(atr)]
+
+                    #print('DomainANDRange_nodes', DomainANDRange_nodes)
+
+                    for dmORrg in DomainANDRange_nodes:
+
+                        classexpressionORvaluedomain_nodes = self.AttributesANDRoles_to_DomainANDRange_mapping[str(dmORrg)]
+
+                        #print('classexpressionORvaluedomain_nodes', classexpressionORvaluedomain_nodes)
+
+                        flag = False
+                        flag_2 = False
+                        for ceORvd in classexpressionORvaluedomain_nodes:
+                            if 'ValueDomainNode:' in str(ceORvd):
+                                half_line = [atr, dmORrg, ceORvd]
+                                all_half_lines.append(half_line)
+                                flag_2 = True
+                            else:
+                                flag = True
+                        if flag and not flag_2:
+                            all_half_lines.append([atr, dmORrg])
+
+            #for i, hl in enumerate(all_half_lines):
+            #    print(i,'-',hl)
+
+            groups =[]
+            group = []
+            line = []
+
+            if len(all_half_lines) == 1:
+                line.extend(all_half_lines[0])
+                group.append(line.copy())
+                line.clear()
+                groups.append(group.copy())
+                group.clear()
+            else:
+                for i,hl in enumerate(all_half_lines):
+                    #print(i,'-hl',hl)
+                    if (i % 2 == 1) or (i == len(all_half_lines) - 1):
+                        if (len(line) > 0) and (str(line[len(line)-1]) == str(hl[0])):
+                            line.extend(hl[1:len(hl)])
+                        else:
+                            line.extend(hl)
+
+                        group.append(line.copy())
+                        line.clear()
+                        if (len(group) == 4) or (i == len(all_half_lines) - 1):
+                            groups.append(group.copy())
+                            group.clear()
+                    else:
+                        hl.reverse()
+                        line.extend(hl)
+
+                    #print('line',line)
+                    #print('group',group)
+                    #print('groups',groups)
+
+            #for i,gr in enumerate(groups):
+            #    print(i,'.gr',gr)
+            #    for l in gr:
+            #        print('     l-',l)
+
+            for gr_no, group_lr in enumerate(groups):
+
+                if gr_no%2==0:
+                    mul = 1.0
+                else:
+                    mul = -1.0
+
+                attributed_placed = set()
+
+                for ln, line_lr in enumerate(group_lr):
+                    #print('     line_lr-',line_lr)
+                    atr = None
+                    value_domains = []
+                    domainORrange_nodes = []
+                    for j,e in enumerate(line_lr):
+                        if 'AttributeNode:' in str(e):
+                            atr = e
+                        elif(('DomainRestrictionNode:' in str(e)) or ('RangeRestrictionNode:' in str(e))):
+                            domainORrange_nodes.append(e)
+                        elif 'ValueDomainNode:' in str(e):
+                            value_domains.append(e)
+                        else:
+                            LOGGER.error('case not considered, contact programmer /3345')
+
+                        X_atr = posX_str_CE + (mul*(gr_no+1.0)*300.0)
+                        Y_atr = posY_str_CE - 100.0 + (ln*60.0)
+                        if atr is not None:
+                            #print('mul',mul,',gr_no',gr_no,',ln',ln)
+                            #print([atr, X_atr, Y_atr])
+                            if str(atr) not in attributed_placed:
+                                list_of_nodes_to_place.append([atr, X_atr, Y_atr])
+                                attributed_placed.add(str(atr))
+
+                    if len(domainORrange_nodes) >= 1:
+
+                        dmORrg_nd1 = domainORrange_nodes[0]
+                        X_dmORrg_nd1 = X_atr + (-1.0)*(10.0 + 20.0 + 10.0)
+                        Y_dmORrg_nd1 = Y_atr + 20.0
+                        #print([dmORrg_nd1, X_dmORrg_nd1, Y_dmORrg_nd1])
+                        list_of_nodes_to_place.append([dmORrg_nd1, X_dmORrg_nd1, Y_dmORrg_nd1])
+
+                        if len(domainORrange_nodes) == 2:
+                            dmORrg_nd2 = domainORrange_nodes[1]
+                            X_dmORrg_nd2 = X_atr + (+1.0) * (10.0 + 20.0 + 10.0)
+                            Y_dmORrg_nd2 = Y_atr + 20.0
+                            #print([dmORrg_nd2, X_dmORrg_nd2, Y_dmORrg_nd2])
+                            list_of_nodes_to_place.append([dmORrg_nd2, X_dmORrg_nd2, Y_dmORrg_nd2])
+                        else:
+                            X_dmORrg_nd2 = None
+                            Y_dmORrg_nd2 = None
+
+                    if len(value_domains) >= 1:
+
+                        vd_nd1 = value_domains[0]
+                        X_vd_nd1 = X_dmORrg_nd1 + (-1.0) * (10.0 + 20.0 + 77.0)
+                        Y_vd_nd1 = Y_dmORrg_nd1 -10.0
+                        #print([vd_nd1, X_vd_nd1, Y_vd_nd1])
+                        list_of_nodes_to_place.append([vd_nd1, X_vd_nd1, Y_vd_nd1])
+
+                        if len(value_domains) == 2:
+                            vd_nd2 = value_domains[1]
+                            X_vd_nd2 = X_dmORrg_nd2 + (+1.0) * (10.0 + 20.0 + 77.0)
+                            Y_vd_nd2 = Y_dmORrg_nd2 -10.0
+                            #print([vd_nd2, X_vd_nd2, Y_vd_nd2])
+                            list_of_nodes_to_place.append([vd_nd2, X_vd_nd2, Y_vd_nd2])
+                        else:
+                            X_vd_nd2 = None
+                            Y_vd_nd2 = None
+                    else:
+                        X_vd_nd1 = None
+                        Y_vd_nd1 = None
+                        X_vd_nd2 = None
+                        Y_vd_nd2 = None
+
+            X_eles = [X_atr]
+            if X_dmORrg_nd1 is not None:
+                X_eles.append(X_dmORrg_nd1)
+            if X_dmORrg_nd2 is not None:
+                X_eles.append(X_dmORrg_nd2)
+            if X_vd_nd1 is not None:
+                X_eles.append(X_vd_nd1)
+            if X_vd_nd2 is not None:
+                X_eles.append(X_vd_nd2)
+
+            Y_eles = [Y_atr]
+            if Y_dmORrg_nd1 is not None:
+                Y_eles.append(Y_dmORrg_nd1)
+            if Y_dmORrg_nd2 is not None:
+                Y_eles.append(Y_dmORrg_nd2)
+            if Y_vd_nd1 is not None:
+                Y_eles.append(Y_vd_nd1)
+            if Y_vd_nd2 is not None:
+                Y_eles.append(Y_vd_nd2)
+
+            max_X = max(X_eles)+150
+            max_Y = max(Y_eles)+75
+            min_X = min(X_eles)+150
+            min_Y = min(Y_eles)-75
+
+            while min_X%150.0 !=0:
+                min_X = min_X - 1.0
+            while max_X%150.0 !=0:
+                max_X = max_X + 1.0
+            while min_Y%200.0 !=0:
+                min_Y = min_Y - 1.0
+            while max_Y%200.0 !=0:
+                max_Y = max_Y + 1.0
+            #print([max_X, max_Y, min_X, min_Y])
+
+            self.occupied_rectangles.append([max_X, max_Y, min_X, min_Y])
+
+            #print('len(list_of_nodes_to_place)',len(list_of_nodes_to_place))
+
+        for i,node_XY in enumerate(list_of_nodes_to_place):
+            node = node_XY[0]
+            new_x = node_XY[1]
+            new_y = node_XY[2]
+
+            #print(i,'     node_XY',node_XY)
+
+            snapToGrid = self.session.action('toggle_grid').isChecked()
+            # node_and_iri = self.get_node_and_iri_from_commands(commands, str_node)
+
+            if node is None:
+                print('>>> place_nodes_in_diagram - node is None')
+                LOGGER.critical('>>> place_nodes_in_diagram - node is None')
+            node.setPos(snap(QtCore.QPoint(new_x, new_y), Diagram.GridSize, snapToGrid))
+            self.occupied_positions_xy[str(node)] = [new_x, new_y]
+
+    def place_roles_and_related_nodes(self, graph_dict_nodes, iri_node_str_dict):
+
+        anchors_for_roles = dict()
+
+        for str_node in self.AttributesANDRoles_to_DomainANDRange_mapping.keys():
+            if 'RoleNode:' in str_node:
+
+                classexpression_anchors_raw = set()
+                #classexpression_anchors_points = []
+
+                white_and_black_square_nodes = self.AttributesANDRoles_to_DomainANDRange_mapping[str_node]
+
+                for wORb_node in white_and_black_square_nodes:
+                    class_expression_nodes = self.AttributesANDRoles_to_DomainANDRange_mapping[str(wORb_node)]
+                    classexpression_anchors_raw = classexpression_anchors_raw.union(set(class_expression_nodes))
+
+                classexpression_anchors = []
+
+                for ce in classexpression_anchors_raw:
+                    if str(ce) in self.occupied_positions_xy.keys():
+                        classexpression_anchors.append(str(ce))
+
+                anchors_for_roles[str_node] = classexpression_anchors
+
+                #for ce in classexpression_anchors:
+                    #points_ce_XY = self.occupied_positions_xy[str(ce)]
+                    #classexpression_anchors_points.append(points_ce_XY)
+
+                #optimized_point = self.get_optimized_point_for_list_of_points(classexpression_anchors_points)
+
+        for str_role in anchors_for_roles.keys():
+            self.place_unplaced_node_aided_by_anchors(str_role, [], anchors_for_roles, iri_node_str_dict, place_role=True)
+
+        #for str_role in anchors_for_roles.keys():
+        #    if str_role not in self.occupied_positions_xy.keys():
+        #        children = graph_dict_nodes[str_role]
+        #        self.place_unplaced_node_aided_by_anchors(str_role, children, anchors_for_roles, iri_node_str_dict, place_role=True)
+
+
+        for str_node in self.AttributesANDRoles_to_DomainANDRange_mapping.keys():
+            if ('RoleNode:' in str_node) and (str_node in self.occupied_positions_xy.keys()):
+
+                role_pos = self.occupied_positions_xy[str_node]
+                white_and_black_square_nodes = self.AttributesANDRoles_to_DomainANDRange_mapping[str_node]
+
+                free_points = []
+
+                if len(white_and_black_square_nodes) <=12:
+                    free_points.extend(self.generate_points_around_role(len(white_and_black_square_nodes), role_pos, 1))
+                else:
+                    free_positions_ROLES = [role_pos]
+
+                    rx = role_pos[0]
+                    ry = role_pos[1]
+                    generated_boxes = [[rx+300, ry],[rx-300, ry],[rx, ry+200],[rx, ry-200],[rx+300, ry-200],[rx-300, ry-200],[rx-300, ry+200],[rx+300, ry+200]]
+                    generated_boxes.extend([[rx+600, ry], [rx-600, ry], [rx, ry+400], [rx, ry-400], [rx+300, ry-400], [rx+600, ry-200], [rx-300, ry-400], [rx-600, ry-200]])
+                    generated_boxes.extend([[rx-300,ry+400], [rx-600, ry+200], [rx+600,ry+200], [rx+300,ry+400], [rx+600,ry-400], [rx-600,ry+400], [rx-600,ry+400], [rx+600,ry+400]])
+
+                    for gb_center_pt in generated_boxes:
+                        if (gb_center_pt not in self.occupied_positions_xy.values()) and self.check_if_point_in_occupied_rectangles(
+                            gb_center_pt):
+                            free_positions_ROLES.append(gb_center_pt)
+
+                    if len(white_and_black_square_nodes) >=13 and len(white_and_black_square_nodes) <=25:
+
+                        free_points.extend(self.generate_points_around_role(10, role_pos, 1))
+                        difference = len(white_and_black_square_nodes) - 10
+                        free_points.extend(self.generate_points_around_role(difference, free_positions_ROLES[0], 2))
+
+                    elif len(white_and_black_square_nodes) >=26 and len(white_and_black_square_nodes) <=40:
+
+                        free_points.extend(self.generate_points_around_role(10, role_pos, 1))
+                        free_points.extend(self.generate_points_around_role(15, free_positions_ROLES[0], 2))
+                        difference = len(white_and_black_square_nodes) - 25
+                        if len(free_positions_ROLES) >=2:
+                            free_points.extend(self.generate_points_around_role(difference, free_positions_ROLES[1], 2))
+
+                    elif len(white_and_black_square_nodes) >=41 and len(white_and_black_square_nodes) <=55:
+
+                        free_points.extend(self.generate_points_around_role(10, role_pos, 1))
+                        free_points.extend(self.generate_points_around_role(15, free_positions_ROLES[0], 2))
+                        if len(free_positions_ROLES) >= 2:
+                            free_points.extend(self.generate_points_around_role(15, free_positions_ROLES[1], 2))
+                            difference = len(white_and_black_square_nodes) - 40
+                            if len(free_positions_ROLES) >= 3:
+                                free_points.extend(self.generate_points_around_role(difference, free_positions_ROLES[2], 2))
+
+                    else:
+                        free_points.extend(self.generate_points_around_role(10, role_pos, 1))
+                        free_points.extend(self.generate_points_around_role(15, free_positions_ROLES[0], 2))
+                        if len(free_positions_ROLES) >= 2:
+                            free_points.extend(self.generate_points_around_role(15, free_positions_ROLES[1], 2))
+                            if len(free_positions_ROLES) >= 3:
+                                free_points.extend(self.generate_points_around_role(difference, free_positions_ROLES[2], 2))
+                                difference = len(white_and_black_square_nodes) - 55
+                                if len(free_positions_ROLES) >= 4:
+                                    free_points.extend(self.generate_points_around_role(difference, free_positions_ROLES[3], 2))
+
+                        if difference>15:
+                            print(difference,' white AND/OR black squares of roles not places perfectly')
+
+                #print('len(white_and_black_square_nodes)',len(white_and_black_square_nodes))
+                #print('len(free_points)',len(free_points))
+
+                while(len(free_points)<len(white_and_black_square_nodes)):
+                    check_pos = [role_pos[0] + 300, role_pos[1]]
+                    while check_pos in self.occupied_positions_xy.values():
+                        check_pos[0] = check_pos[0] + 300
+                    free_points.extend(self.generate_points_around_role(15, check_pos, 2))
+
+                for whiteORblack_node in white_and_black_square_nodes:
+
+                    CE_anchors = self.AttributesANDRoles_to_DomainANDRange_mapping[str(whiteORblack_node)]
+
+                    sum_dist = []
+
+                    #print('free_points',free_points)
+
+                    for fp in free_points:
+
+                        sum_X = 0
+                        sum_Y = 0
+
+                        for CE_anch in CE_anchors:
+
+                            if str(CE_anch) in self.occupied_positions_xy.keys():
+                                XY_CE_anch = self.occupied_positions_xy[str(CE_anch)]
+                                X_CE_anch = XY_CE_anch[0]
+                                Y_CE_anch = XY_CE_anch[1]
+                            else:
+                                continue
+
+                            X_dist = abs(fp[0] - X_CE_anch)
+                            Y_dist = abs(fp[1] - Y_CE_anch)
+
+                            sum_X = sum_X + X_dist
+                            sum_Y = sum_Y + Y_dist
+
+                        sum_dist.append(sum_X+sum_Y)
+
+                    min = max(sum_dist)
+                    for s in sum_dist:
+                        if (s<min) and (s!=0):
+                            min = s
+
+                    s_ind = sum_dist.index(min)
+                    fp_to_select = free_points[s_ind]
+
+                    snapToGrid = self.session.action('toggle_grid').isChecked()
+
+                    if whiteORblack_node is None:
+                        print('>>> place_nodes_in_diagram - node is None')
+                        LOGGER.critical('>>> place_nodes_in_diagram - node is None')
+                    whiteORblack_node.setPos(snap(QtCore.QPoint(fp_to_select[0], fp_to_select[1]), Diagram.GridSize, snapToGrid))
+
+                    self.occupied_positions_xy[str(whiteORblack_node)] = fp_to_select
+
+                    free_points.remove(fp_to_select)
+
+    def get_total_number_of_slots_of_attributes_for_classexpressions(self, iri_node_str_dict):
+
+        for str_node in self.AttributesANDRoles_to_DomainANDRange_mapping.keys():
+            if 'AttributeNode:' in str_node:
+                domainORrange_nodes = self.AttributesANDRoles_to_DomainANDRange_mapping[str_node]
+                for dmORrg in domainORrange_nodes:
+                    classexpressions_OR_valuedomain = self.AttributesANDRoles_to_DomainANDRange_mapping[str(dmORrg)]
+                    for ceOrvd in classexpressions_OR_valuedomain:
+                        if 'ValueDomainNode:' not in str(ceOrvd):
+                            if str(ceOrvd) not in self.attributes_for_classexpressions.keys():
+                                self.attributes_for_classexpressions[str(ceOrvd)] = set()
+                            self.attributes_for_classexpressions[str(ceOrvd)].add(iri_node_str_dict[str_node][0])
+
+        # 2 dmORrg nodes can fit in 1 line
+        for str_ce in self.attributes_for_classexpressions.keys():
+
+            summation_dmORrg_nodes = 0
+            #print('str_ce',str_ce)
+            attributes = self.attributes_for_classexpressions[str_ce]
+            for atr in attributes:
+                children = self.AttributesANDRoles_to_DomainANDRange_mapping[str(atr)]
+                #print('     atr',atr)
+                #print('         children', children)
+                summation_dmORrg_nodes = summation_dmORrg_nodes + len(children)
+
+            temp = list(attributes)
+            temp.append(summation_dmORrg_nodes)
+            self.attributes_for_classexpressions[str_ce] = temp
 
     def place_edges_in_diagram(self, graph_dict_edges):
 
         commands_to_return = []
+
+        EDGE_diagram_edge_pair = []
+        DIAGRAM_diagram_edge_pair = []
+
+        all_diagrams = set()
+        break_points = []
+        bp_edges = []
+        bp_indices = []
 
         for edge_type in graph_dict_edges.keys():
             pairs = graph_dict_edges[edge_type]
@@ -2892,9 +4071,40 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                 child = p[0]
                 parent = p[1]
 
-                if edge_type == 65555:
-                    print('65555 parent', parent)
-                    print('65555 child',child)
+                str_child_parent = str(child)+str(parent)
+
+                # InclusionEdge = 65554
+                # InputEdge = 65556
+                cdr = 'DomainRestrictionNode:' in str_child_parent or 'RangeRestrictionNode:' in str_child_parent
+                ca = 'AttributeNode:' in str(child) and 'AttributeNode:' in str(parent)
+                cpi = ('ComplementNode:' in str(parent) or 'InverseNode:' in str(parent)) and (edge_type == 65556)
+
+                flag = ca or (not cpi and not cdr)
+
+                if flag is False:
+                    break_point = None
+                else:
+                    #print('str_child_parent', str_child_parent)
+                    #print(cdr, ca, cpi, '-', flag)
+                    if (edge_type == 65554) or (edge_type == 65556):
+                        child_pos = self.occupied_positions_xy[str(child)]
+                        parent_pos = self.occupied_positions_xy[str(parent)]
+                        if (child_pos[0] == parent_pos[0]) or (child_pos[1] == parent_pos[1]):
+                            break_point = None
+                        else:
+                            if parent_pos[1] < child_pos[1]: # if parent is above the child
+                                if edge_type == 65554:
+                                    break_point = QtCore.QPointF(child_pos[0], child_pos[1] - 100.0)
+                                else:
+                                    break_point = QtCore.QPointF(child_pos[0], parent_pos[1] + 100.0)
+                            elif parent_pos[1] > child_pos[1]: # if parent is below the child
+                                if edge_type == 65554:
+                                    break_point = QtCore.QPointF(child_pos[0], child_pos[1] + 150.0)
+                                else:
+                                    break_point = QtCore.QPointF(parent_pos[0], child_pos[1] + 150.0)
+                            else:
+                                break_point = None
+
 
                 edge = self.diagram_to_place.factory.create(Item(edge_type), source=child)
 
@@ -2919,9 +4129,24 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                         self.diagram_to_place.removeItem(edge)
 
                 if insertEdge:
-                    commands_to_return.append(CommandEdgeAdd(self.diagram_to_place, edge))
+                    #commands_to_return.append(CommandEdgeAdd(self.diagram_to_place, edge))
+                    DIAGRAM_diagram_edge_pair.append(self.diagram_to_place)
+                    EDGE_diagram_edge_pair.append(edge)
+
+                    if break_point is not None:
+                        #print(edge_type,',break_point-',break_point, ' child_pos-',child_pos,' parent_pos-',parent_pos)
+                        all_diagrams.add(self.diagram_to_place)
+                        break_points.append(break_point)
+                        bp_edges.append(edge)
+                        bp_indices.append(0)
                 else:
-                    print('         insert edge is false',edge)
+                    #print('         insert edge is false',edge)
+                    pass
+
+        if len(EDGE_diagram_edge_pair) > 0:
+            commands_to_return.append(CommandEdgesAdd(DIAGRAM_diagram_edge_pair, EDGE_diagram_edge_pair))
+        if len(break_points) > 0:
+            commands_to_return.append(CommandEdgesBreakpointsAdd(list(all_diagrams), bp_edges, bp_indices, break_points))
 
         return commands_to_return
 
@@ -2932,19 +4157,19 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
         dwh_of_nodes_dict = dict()
         current_depth = 0
 
-        print('len(root_nodes)',len(root_nodes))
-        for r in list(root_nodes):
-            print('r',r)
+        #print('len(root_nodes)',len(root_nodes))
+        #for r in list(root_nodes):
+        #    print('r',r)
 
         stack_trace = []
 
         for r in list(root_nodes):
-            print('     r', r)
+            #print('     r', r)
 
             children = graph_dict_nodes[r]
 
-            for c in children:
-                print('         c',c)
+            #for c in children:
+            #    print('         c',c)
 
             stack_trace.append(r)
 
@@ -2973,7 +4198,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
         max_height = 0
         for r in list(root_nodes):
             dwh_vals = dwh_of_nodes_dict[r]
-            width = dwh_vals[1]
+            width = max(dwh_vals[1])
             height = dwh_vals[2]
             summation_width = summation_width + width
             max_height = max(max_height, height)
@@ -2986,17 +4211,17 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         for str_node in graph_dict_nodes.keys():
             sub_str = str_node[0:str_node.index(':')+1]
-            print('sub_str',sub_str)
+            #print('sub_str',sub_str)
             if sub_str not in self.exclusion_list:
                 refined_dict[str_node] = []
                 values = graph_dict_nodes[str_node]
                 for v in values:
-                    print('     str(v)',str(v))
+                    #print('     str(v)',str(v))
                     sub_str_2 = str(v)[0:str(v).index(':')+1]
                     if sub_str_2 not in self.exclusion_list:
                         refined_dict[str_node].append(v)
 
-        print('len(refined_dict.keys)',len(refined_dict.keys()))
+        #print('len(refined_dict.keys)',len(refined_dict.keys()))
 
         refined_dict_2 = refined_dict.copy()
 
@@ -3040,7 +4265,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
             else:
                 flag = False
 
-        print('len(refined_dict_2.keys)', len(refined_dict_2.keys()))
+        #print('len(refined_dict_2.keys)', len(refined_dict_2.keys()))
 
         #return refined_dict_2
 
@@ -3083,7 +4308,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
                     #print('--**--',str_node)
                     delete_list_2.append(str_node)
 
-            print('delete_list_2',delete_list_2)
+            #print('delete_list_2',delete_list_2)
 
             if len(delete_list_2) > 0:
                 for d in delete_list_2:
@@ -3092,7 +4317,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
             else:
                 flag_2 = False
 
-        print('len(refined_dict_3.keys)', len(refined_dict_3.keys()))
+        #print('len(refined_dict_3.keys)', len(refined_dict_3.keys()))
 
         return refined_dict_3
 
@@ -3100,6 +4325,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         filtered_graph_dict_nodes = self.get_refined_graph(graph_dict_nodes, graph_dict_edges)
 
+        """
         print('---   graph_dict_nodes')
         for k in graph_dict_nodes.keys():
             print('k', k)
@@ -3115,6 +4341,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
             for v in values:
                 print('     v',str(v))
         print('---   filtered_graph_dict_nodes END')
+        """
 
         #print('placing filtered classes')
         values_1 = self.place_sub_graph_in_a_diagram(filtered_graph_dict_nodes, iri_node_str_dict, 0)
@@ -3140,7 +4367,13 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
         #for val in self.occupied_positions_xy.values():
             #print('val',val)
 
-        self.place_nodes_in_diagram_2(unplaced_nodes, graph_dict_nodes, graph_dict_edges, iri_node_str_dict)
+        self.place_attributes_and_related_nodes()
+        self.place_roles_and_related_nodes(graph_dict_nodes, iri_node_str_dict)
+
+        placed_nodes = set(self.occupied_positions_xy.keys())
+        unplaced_nodes = all_nodes.difference(placed_nodes)
+
+        self.place_nodes_in_diagram_3(unplaced_nodes, graph_dict_nodes, graph_dict_edges, iri_node_str_dict)
 
         edge_commands = self.place_edges_in_diagram(graph_dict_edges)
 
@@ -3156,6 +4389,88 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
         return [summation_width, max_height, edge_commands]
 
     def generate_and_push_commands_to_the_session(self, iri_node_str_dict, other_nodes_to_add,\
+                                                  width_to_set_for_diagram, height_to_set_for_diagram, edge_commands):
+
+        t_start = time.clock()
+
+        #print('t_start',t_start)
+
+        print('>>> generate_and_push_commands_to_the_session')
+
+        nodes_in_dict = iri_node_str_dict.keys()
+
+        Duplicate_dict_1 = self.project.copy_IRI_prefixes_nodes_dictionaries(self.project.IRI_prefixes_nodes_dict, dict())
+        Duplicate_dict_2 = self.project.copy_IRI_prefixes_nodes_dictionaries(self.project.IRI_prefixes_nodes_dict, dict())
+
+        commands_session = []
+
+        all_iris = set()
+
+        all_nodes_to_add = []
+        all_nodes_to_add.extend(nodes_in_dict)
+        all_nodes_to_add.extend(list(other_nodes_to_add))
+
+        nodes_to_add = []
+
+        #for i,node_str in enumerate(all_nodes_to_add):
+        for node_str in iri_node_str_dict.keys():
+            node_and_iri = iri_node_str_dict[node_str]
+
+            node = node_and_iri[0]
+            nodes_to_add.append(node)
+
+            full_iri = node_and_iri[1]
+
+            if full_iri.toString() !='':
+                res = self.project.get_iri_and_rc_from_full_iri(full_iri.toString())
+                iri = res[0]
+                rc = res[1]
+
+                if 'AttributeNode:' in str(node) or 'ConceptNode:' in str(node) or 'RoleNode:' in str(node) or 'IndividualNode:' in str(node):
+                    node.remaining_characters = rc
+                    node.setText(full_iri.toString())
+
+                if (iri is not None):
+                    all_iris.add(iri)
+                    Duplicate_dict_1 = self.project.addIRINodeEntry(Duplicate_dict_1, iri, node)
+
+            #commands_session.append(CommandNodeAdd(self.diagram_to_place, node))
+
+        commands_session.append(CommandNodesAdd(self.diagram_to_place, nodes_to_add))
+
+        commands_session.insert(0, CommandProjetSetIRIPrefixesNodesDict(self.project, Duplicate_dict_2, Duplicate_dict_1,
+                                                                     list(all_iris), None))
+        commands_session.append(CommandProjetSetIRIPrefixesNodesDict(self.project, Duplicate_dict_2, Duplicate_dict_1,
+                                                                     list(all_iris), None))
+        commands_session.insert(0, CommandProjectDisconnectSpecificSignals(self.project))
+        commands_session.append(CommandProjectConnectSpecificSignals(self.project))
+
+        for c in edge_commands:
+            commands_session.append(c)
+
+        #commands_session.insert(0, CommandDiagramResize(self.diagram_to_place, self.diagram_to_place.sceneRect()))
+        #commands_session.append(CommandDiagramResize(self.diagram_to_place, QtCore.QRectF(-5000, -5000, \
+        #                (width_and_height_to_set_for_diagram[0]*300), (width_and_height_to_set_for_diagram[1]*300))))
+
+        t1 = time.clock()
+
+        print('Dict const time',(t1- t_start))
+
+        print('Pushing to undostack')
+
+        if any(commands_session):
+            self.session.undostack.beginMacro('')
+            for c in commands_session:
+                if c:
+                    tc_start = time.clock()
+                    self.session.undostack.push(c)
+                    tc_end = time.clock()
+                    print('c-',c,'  tt', tc_end-tc_start)
+            self.session.undostack.endMacro()
+
+        print('>>> generate_and_push_commands_to_the_session END')
+
+    def generate_and_push_commands(self, iri_node_str_dict, other_nodes_to_add,\
                                                   width_to_set_for_diagram, height_to_set_for_diagram, edge_commands):
 
         #print('>>> generate_and_push_commands_to_the_session')
@@ -3181,9 +4496,6 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
             node = node_and_iri[0]
             full_iri = node_and_iri[1]
-
-            if full_iri.toString() == 'fake':
-                continue
 
             res = self.project.get_iri_and_rc_from_full_iri(full_iri.toString())
             iri = res[0]
@@ -3218,11 +4530,9 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
         #                (width_and_height_to_set_for_diagram[0]*300), (width_and_height_to_set_for_diagram[1]*300))))
 
         if any(commands_session):
-            self.session.undostack.beginMacro('')
             for c in commands_session:
                 if c:
-                    self.session.undostack.push(c)
-            self.session.undostack.endMacro()
+                    c.redo()
 
         #print('>>> generate_and_push_commands_to_the_session END')
 
@@ -3278,6 +4588,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         return dict_op
 
+    #not used
     def create_graph_edges(self, graph_dict_nodes, graph_dict_edges, iri_node_str_dict):
 
         list_1 = [Item.UnionNode, Item.ComplementNode, Item.DisjointUnionNode,
@@ -3335,50 +4646,47 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         return return_result
 
+    def Mark_all_disjoint_class_expressions(self, disjoint_axioms):
+
+        for da in disjoint_axioms:
+            disjoint_class_expressions = da.getClassExpressions()
+            itr = disjoint_class_expressions.iterator()
+            temp = []
+            while(itr.hasNext()):
+                dce = itr.next()
+                new_castes_dce = cast(self.OWLClassExpression, dce)
+                temp.append(new_castes_dce)
+
+            self.disjoint_class_expressions_for_all_DisjointClassesAxioms.append(temp)
+    
+    def Extend_AttributesANDRoles_to_DomainANDRange_mapping_dict(self, graph_dict_nodes, iri_node_str_dict):
+
+        for str_nd in graph_dict_nodes:
+            if 'DomainRestrictionNode:' in str_nd or 'RangeRestrictionNode:' in str_nd:
+                if str_nd not in self.AttributesANDRoles_to_DomainANDRange_mapping.keys():
+                    children = graph_dict_nodes[str_nd]
+                    self.AttributesANDRoles_to_DomainANDRange_mapping[str_nd] = children
+
+        for str_ExFallCar_node in self.AttributesANDRoles_to_DomainANDRange_mapping.keys():
+            if ('DomainRestrictionNode:' in str_ExFallCar_node) or ('RangeRestrictionNode:' in str_ExFallCar_node):
+                children = graph_dict_nodes[str_ExFallCar_node]
+                for child in children:
+                    if ('AttributeNode:' in str(child)) or ('RoleNode:' in str(child)):
+                        node = iri_node_str_dict[str_ExFallCar_node][0]
+                        self.AttributesANDRoles_to_DomainANDRange_mapping[str(child)].append(node)
+                    elif 'ValueDomainNode:' in str(child):
+                        if ('DomainRestrictionNode:' in str_ExFallCar_node):
+                            self.AttributesANDRoles_to_DomainANDRange_mapping[str_ExFallCar_node].append(child)
+    
     def junk_code(self):
 
         """
-                all_commands = self.convert_axioms_to_nodes_and_edges_or_metadata(iri_node_str_dict)
+        all_commands = self.convert_axioms_to_nodes_and_edges_or_metadata(iri_node_str_dict)
 
-                declaration_commands = all_commands[0]
-                class_commands_sub_class_of = all_commands[1]
-                class_commands_disjoint_classes = all_commands[2]
-                class_commands_equivalent_classes = all_commands[3]
+        declaration_commands = all_commands[0]
+                
+        #self.print_dictionary(iri_node_str_dict)
 
-                #self.print_commands(declaration_commands)
-                #self.print_commands(class_commands_sub_class_of)
-                #self.print_commands(class_commands_disjoint_classes)
-                #self.print_commands(class_commands_equivalent_classes)
-
-                all_commands = []
-                all_commands.extend(class_commands_sub_class_of)
-                all_commands.extend(class_commands_disjoint_classes)
-                all_commands.extend(class_commands_equivalent_classes)
-
-                #iri_node_str_dict = self.create_iri_node_str_node_list(all_commands)
-
-                #self.print_dictionary(iri_node_str_dict)
-
-
-
-                #graph_sub_classOf = dict()
-                graph_disjoint_classes = dict()
-                graph_equivalent_classes = dict()
-                graph_sub_classOf = self.create_graph_sub_class_of(class_commands_sub_class_of)
-                #graph_disjoint_classes = self.create_graph_disjoint_classes(class_commands_disjoint_classes, iri_node_str_dict)
-                #graph_equivalent_classes = self.create_graph_equivalent_classes(class_commands_equivalent_classes, graph_dict_edges, iri_node_str_dict)
-
-                black_nodes_sub_class = self.get_unionOfdisjoint_node_equivalent(graph_sub_classOf)
-                black_nodes_disjoint_classes = self.get_unionOfdisjoint_node_equivalent(graph_disjoint_classes)
-                black_nodes_equivalent_classes = self.get_unionOfdisjoint_node_equivalent(graph_equivalent_classes)
-
-                print('black_nodes_sub_class',black_nodes_sub_class)
-                print('black_nodes_disjoint_classes',black_nodes_disjoint_classes)
-                print('black_nodes_equivalent_classes',black_nodes_equivalent_classes)
-
-                self.create_graph_edges(graph_sub_classOf, graph_dict_edges, iri_node_str_dict)
-                self.create_graph_edges(graph_equivalent_classes, graph_dict_edges, iri_node_str_dict)
-                self.create_graph_edges(graph_disjoint_classes, graph_dict_edges, iri_node_str_dict)
         """
         """
                 for k in iri_node_str_dict:
@@ -3418,12 +4726,13 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
     def run(self):
 
+        t_start = time.clock()
+
         self.man = self.OWLManager.createOWLOntologyManager()
         self.df = self.man.getOWLDataFactory()
         self.pm = self.DefaultPrefixManager()
 
         self.fetch_ontology_from_file(self.path)
-        #self.fetch_ontology_from_file('C://Users/Ashwin/Desktop/Pizza.owl')
 
         iri_node_str_dict = dict()
 
@@ -3439,35 +4748,72 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
 
         ObjectPropertyDomain_axioms = self.ontology.getAxioms(self.AxiomType.OBJECT_PROPERTY_DOMAIN)
         ObjectPropertyRange_axioms = self.ontology.getAxioms(self.AxiomType.OBJECT_PROPERTY_RANGE)
+        DataPropertyDomain_axioms = self.ontology.getAxioms(self.AxiomType.DATA_PROPERTY_DOMAIN)
+        DataPropertyRange_axioms = self.ontology.getAxioms(self.AxiomType.DATA_PROPERTY_RANGE)
         SubClassOf_axioms = self.ontology.getAxioms(self.AxiomType.SUBCLASS_OF)
-        DisjointClass_axioms = self.ontology.getAxioms(self.AxiomType.DISJOINT_CLASSES)
-        EquivalentClass_axioms = self.ontology.getAxioms(self.AxiomType.EQUIVALENT_CLASSES)
 
+        DisjointClass_axioms = self.ontology.getAxioms(self.AxiomType.DISJOINT_CLASSES)
+        DisjointObjectProperty_axioms = self.ontology.getAxioms(self.AxiomType.DISJOINT_OBJECT_PROPERTIES)
+        DisjointDataProperty_axioms = self.ontology.getAxioms(self.AxiomType.DISJOINT_DATA_PROPERTIES)
+
+        EquivalentClass_axioms = self.ontology.getAxioms(self.AxiomType.EQUIVALENT_CLASSES)
+        EquivalentObjectProperty_axioms = self.ontology.getAxioms(self.AxiomType.EQUIVALENT_OBJECT_PROPERTIES)
+        EquivalentDataProperty_axioms = self.ontology.getAxioms(self.AxiomType.EQUIVALENT_DATA_PROPERTIES)
+
+        InverseObjectProperties_axioms = self.ontology.getAxioms(self.AxiomType.INVERSE_OBJECT_PROPERTIES)
         SubObjectProperty_axioms = self.ontology.getAxioms(self.AxiomType.SUB_OBJECT_PROPERTY)
         SubObjectPropertychain_axioms = self.ontology.getAxioms(self.AxiomType.SUB_PROPERTY_CHAIN_OF)
         SubDataProperty_axioms = self.ontology.getAxioms(self.AxiomType.SUB_DATA_PROPERTY)
-        InverseObjectProperties_axioms = self.ontology.getAxioms(self.AxiomType.INVERSE_OBJECT_PROPERTIES)
-        #INVERSE_OBJECT_PROPERTIES
+
+        DisjointUnion_axioms = self.ontology.getAxioms(self.AxiomType.DISJOINT_UNION)
+
+        #AllTboxAxioms = self.ontology.getAxioms(self.AxiomType.TBoxAxiomTypes)
+
+        itr_0 = DisjointUnion_axioms.iterator()
+
         itr_1 = SubClassOf_axioms.iterator()
         itr_1_2 = ObjectPropertyDomain_axioms.iterator()
         itr_1_3 = ObjectPropertyRange_axioms.iterator()
+        itr_1_4 = DataPropertyDomain_axioms.iterator()
+        itr_1_5 = DataPropertyRange_axioms.iterator()
+
         itr_2 = EquivalentClass_axioms.iterator()
+        itr_2_2 = EquivalentObjectProperty_axioms.iterator()
+        itr_2_3 = EquivalentDataProperty_axioms.iterator()
+
         itr_3 = DisjointClass_axioms.iterator()
+        itr_3_2 = DisjointObjectProperty_axioms.iterator()
+        itr_3_3 = DisjointDataProperty_axioms.iterator()
+
         itr_4 = SubObjectProperty_axioms.iterator()
         itr_4_2 = InverseObjectProperties_axioms.iterator()
         itr_5 = SubObjectPropertychain_axioms.iterator()
         itr_6 = SubDataProperty_axioms.iterator()
 
+        #itr_T = AllTboxAxioms.iterator()
+
+        AllTboxANDRboxAxioms = []
+
+        DisjointUnion_axioms = []
         ObjectPropertyDomain_axioms = []
         ObjectPropertyRange_axioms = []
+        DataPropertyDomain_axioms = []
+        DataPropertyRange_axioms = []
         SubClassOf_axioms = []
         EquivalentClasses_axioms = []
+        EquivalentObjectProperty_axioms = []
+        EquivalentDataProperty_axioms = []
         DisjointClasses_axioms = []
+        DisjointObjectProperty_axioms = []
+        DisjointDataProperty_axioms = []
         SubObjectProperty_axioms = []
         SubObjectPropertychain_axioms = []
         InverseObjectProperties_axioms = []
         SubDataProperty_axioms = []
 
+        while itr_0.hasNext():
+            a = itr_0.next()
+            DisjointUnion_axioms.append(a)
         while itr_1.hasNext():
             a = itr_1.next()
             SubClassOf_axioms.append(a)
@@ -3477,12 +4823,30 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
         while itr_1_3.hasNext():
             a = itr_1_3.next()
             ObjectPropertyRange_axioms.append(a)
+        while itr_1_4.hasNext():
+            a = itr_1_4.next()
+            DataPropertyDomain_axioms.append(a)
+        while itr_1_5.hasNext():
+            a = itr_1_5.next()
+            DataPropertyRange_axioms.append(a)
         while itr_2.hasNext():
             a = itr_2.next()
             EquivalentClasses_axioms.append(a)
+        while itr_2_2.hasNext():
+            a = itr_2_2.next()
+            EquivalentObjectProperty_axioms.append(a)
+        while itr_2_3.hasNext():
+            a = itr_2_3.next()
+            EquivalentDataProperty_axioms.append(a)
         while itr_3.hasNext():
             a = itr_3.next()
             DisjointClasses_axioms.append(a)
+        while itr_3_2.hasNext():
+            a = itr_3_2.next()
+            DisjointObjectProperty_axioms.append(a)
+        while itr_3_3.hasNext():
+            a = itr_3_3.next()
+            DisjointDataProperty_axioms.append(a)
         while itr_4.hasNext():
             a = itr_4.next()
             SubObjectProperty_axioms.append(a)
@@ -3496,16 +4860,70 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
             a = itr_6.next()
             SubDataProperty_axioms.append(a)
 
+        AllTboxANDRboxAxioms.extend(DisjointUnion_axioms)
+        AllTboxANDRboxAxioms.extend(ObjectPropertyDomain_axioms)
+        AllTboxANDRboxAxioms.extend(ObjectPropertyRange_axioms)
+        AllTboxANDRboxAxioms.extend(DataPropertyDomain_axioms)
+        AllTboxANDRboxAxioms.extend(DataPropertyRange_axioms)
+        AllTboxANDRboxAxioms.extend(SubClassOf_axioms)
+        AllTboxANDRboxAxioms.extend(EquivalentClasses_axioms)
+        AllTboxANDRboxAxioms.extend(EquivalentObjectProperty_axioms)
+        AllTboxANDRboxAxioms.extend(EquivalentDataProperty_axioms)
+        AllTboxANDRboxAxioms.extend(DisjointClasses_axioms)
+        AllTboxANDRboxAxioms.extend(DisjointObjectProperty_axioms)
+        AllTboxANDRboxAxioms.extend(DisjointDataProperty_axioms)
+        AllTboxANDRboxAxioms.extend(SubObjectProperty_axioms)
+        AllTboxANDRboxAxioms.extend(SubObjectPropertychain_axioms)
+        AllTboxANDRboxAxioms.extend(InverseObjectProperties_axioms)
+        AllTboxANDRboxAxioms.extend(SubDataProperty_axioms)
+
+        self.Mark_all_disjoint_class_expressions(DisjointClasses_axioms)
+
+        self.Process_DisjointUnion_axioms(DisjointUnion_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict)
+
         self.Process_SubClassOF_axioms(SubClassOf_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict, 0)
         self.Process_SubClassOF_axioms(ObjectPropertyDomain_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict, 1)
         self.Process_SubClassOF_axioms(ObjectPropertyRange_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict, 2)
+        self.Process_SubClassOF_axioms(DataPropertyDomain_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict, 3)
+        self.Process_SubClassOF_axioms(DataPropertyRange_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict, 4)
+
         self.Process_EquivalentClasses_axioms(EquivalentClasses_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict)
-        self.Process_DisjointClasses_axioms(DisjointClasses_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict)
+        self.Process_EquivalentObjectANDDataProperties_axioms(EquivalentObjectProperty_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict, 0)
+        self.Process_EquivalentObjectANDDataProperties_axioms(EquivalentDataProperty_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict, 1)
+
+        self.Process_DisjointObjectANDDataProperties_axioms(DisjointObjectProperty_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict, 0)
+        self.Process_DisjointObjectANDDataProperties_axioms(DisjointDataProperty_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict, 1)
 
         self.Process_SubObjectPropertyOF_axioms(SubObjectProperty_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict, False)
         self.Process_SubObjectPropertyOF_axioms(SubObjectPropertychain_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict, True)
         self.Process_InverseObjectProperties_axioms(InverseObjectProperties_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict)
         self.Process_SubDataPropertyOF_axioms(SubDataProperty_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict)
+
+        # disjoint classes axioms are processed in the end because there is no need to generate not nodes between pairs of disjoint C.Es
+        # if a black node already exists between them.
+        # Hence, all class expressions should first be converted into nodes and edges.
+        #self.Process_DisjointClasses_axioms(DisjointClasses_axioms, graph_dict_nodes, graph_dict_edges, iri_node_str_dict)
+        self.Process_DisjointClasses_axioms_2(graph_dict_nodes, graph_dict_edges, iri_node_str_dict)
+
+        #for k in self.AttributesANDRoles_to_DomainANDRange_mapping.keys():
+        #    print('k0',k)
+        #    print('     v0',self.AttributesANDRoles_to_DomainANDRange_mapping[k])
+
+        self.Extend_AttributesANDRoles_to_DomainANDRange_mapping_dict(graph_dict_nodes, iri_node_str_dict)
+        self.get_total_number_of_slots_of_attributes_for_classexpressions(iri_node_str_dict)
+
+
+
+        white_OR_black_square_nodes_not_placed = []
+        for str_nd in graph_dict_nodes:
+            if 'DomainRestrictionNode:' in str_nd or 'RangeRestrictionNode:' in str_nd:
+                if str_nd not in self.AttributesANDRoles_to_DomainANDRange_mapping.keys():
+                    white_OR_black_square_nodes_not_placed.append(str_nd)
+        if len(white_OR_black_square_nodes_not_placed) >0:
+            print('>>>      White or black square nodes not connected to attributes or roles:')
+            for wb in white_OR_black_square_nodes_not_placed:
+                print('     ',wb)
+            print('>>>      White or black square nodes not connected to attributes or roles: END')
 
         method_return_values = self.place_graph_in_a_diagram(graph_dict_nodes, graph_dict_edges, iri_node_str_dict)
 
@@ -3514,5 +4932,14 @@ class OWL2OntologyLoader(AbstractOntologyLoader):
         edge_commands = method_return_values[2]
         #other_nodes_to_add = method_return_values[3]
 
+        t_end = time.clock()
+
+        print('algorithm computation',t_end-t_start)
+
         self.generate_and_push_commands_to_the_session(iri_node_str_dict, set(), width_to_set_for_diagram, \
                                                        height_to_set_for_diagram, edge_commands)
+
+        #self.generate_and_push_commands(iri_node_str_dict, set(), width_to_set_for_diagram, \
+        #                                               height_to_set_for_diagram, edge_commands)
+
+        detach()

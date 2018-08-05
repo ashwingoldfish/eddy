@@ -99,6 +99,85 @@ class CommandEdgeAdd(QtWidgets.QUndoCommand):
         self.diagram.sgnUpdated.emit()
 
 
+class CommandEdgesAdd(QtWidgets.QUndoCommand):
+    """
+    This command is used to add an edge to a diagram.
+    """
+    def __init__(self, diagrams, edges):
+        """
+        Initialize the command.
+        """
+        super().__init__('add edges')
+
+        #self.inputs = {'redo': [], 'undo': []}
+
+        self.all_inputs = []
+        self.diagrams = diagrams
+        self.edges = edges
+
+        # IMPORTANT: do not remove the following since it's
+        # needed by property assertion node and role chain node
+        # to correctly generate an entry in their input lists.
+        for edge in self.edges:
+
+            inputs = {'redo': [], 'undo': []}
+
+            edge.source.addEdge(edge)
+            edge.target.addEdge(edge)
+            edge.updateEdge()
+
+            if edge.type() is Item.InputEdge:
+                # If we are adding an input edge targeting a role chain or a property
+                # assertion node we need to save the new inputs order and compute the
+                # old one by removing the current edge id from the input list.
+                if edge.target.type() in {Item.RoleChainNode, Item.PropertyAssertionNode}:
+                    inputs['redo'] = edge.target.inputs[:]
+                    inputs['undo'] = edge.target.inputs[:]
+                    inputs['undo'].remove(edge.id)
+
+            self.all_inputs.append(inputs)
+
+    def redo(self):
+        """redo the command"""
+        for e, edge in enumerate(self.edges):
+            # Map source/target over the edge.
+            edge.source.addEdge(edge)
+            edge.target.addEdge(edge)
+            # Switch the inputs.
+            if edge.target.type() in {Item.RoleChainNode, Item.PropertyAssertionNode}:
+                inputs = self.all_inputs[e]
+                edge.target.inputs = inputs['redo'][:]
+
+            # Add the edge to the diagram.
+            diagram = self.diagrams[e]
+            diagram.addItem(edge)
+            # Update edge geometry.
+            edge.updateEdge()
+            # Emit diagram specific signals.
+            diagram.sgnItemAdded.emit(diagram, edge)
+        # if self.update_diagram:
+        for diagram in self.diagrams:
+            diagram.sgnUpdated.emit()
+
+    def undo(self):
+        """undo the command"""
+        for e, edge in enumerate(self.edges):
+            # Remove source/target from the edge.
+            edge.source.removeEdge(edge)
+            edge.target.removeEdge(edge)
+            # Switch the inputs.
+            if edge.target.type() in {Item.RoleChainNode, Item.PropertyAssertionNode}:
+                inputs = self.all_inputs[e]
+                edge.target.inputs = inputs['undo'][:]
+            diagram = self.diagrams[e]
+            # Remove the edge from the diagram.
+            diagram.removeItem(edge)
+            diagram.sgnItemRemoved.emit(diagram, edge)
+        # if self.update_diagram:
+        for diagram in self.diagrams:
+            diagram.sgnUpdated.emit()
+
+
 class CommandEdgeBreakpointAdd(QtWidgets.QUndoCommand):
     """
     This command is used to add a breakpoint on the given edge.
@@ -128,6 +207,44 @@ class CommandEdgeBreakpointAdd(QtWidgets.QUndoCommand):
         self.edge.breakpoints.pop(self.index)
         self.edge.updateEdge()
         self.diagram.sgnUpdated.emit()
+
+
+class CommandEdgesBreakpointsAdd(QtWidgets.QUndoCommand):
+    """
+    This command is used to add a breakpoint on the given edge.
+    """
+    def __init__(self, diagrams, edges, indices, points):
+        """
+        Initialize the command.
+        :type diagrams: Diagrams
+        :type edges: AbstractEdges
+        :type indices: int[]
+        :type points: QPointF[]
+        """
+        super().__init__('add {0} breakpoints')
+        self.edges = edges
+        self.indices = indices
+        self.points = points
+        self.diagrams = diagrams
+
+    def redo(self):
+        """redo the command"""
+        for i,edge in enumerate(self.edges):
+            index = self.indices[i]
+            point = self.points[i]
+            edge.breakpoints.insert(index, point)
+            edge.updateEdge()
+        for diag in self.diagrams:
+            diag.sgnUpdated.emit()
+
+    def undo(self):
+        """undo the command"""
+        for i,edge in enumerate(self.edges):
+            index = self.indices[i]
+            edge.breakpoints.pop(index)
+            edge.updateEdge()
+        for diag in self.diagrams:
+            diag.sgnUpdated.emit()
 
 
 class CommandEdgeAnchorMove(QtWidgets.QUndoCommand):
