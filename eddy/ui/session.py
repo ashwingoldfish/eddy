@@ -1418,7 +1418,7 @@ class Session(HasReasoningSystem, HasActionSystem, HasMenuSystem, HasPluginSyste
                         for path in selected:
                             progress.setWindowTitle('Importing {0}...'.format(os.path.basename(path)))
                             worker = self.createOntologyLoader(filetype, path, self.project, self)
-                            worker.run()
+                            worker.run(expandPath(first(dialog.selectedFiles())))
                 except Exception as e:
                     msgbox = QtWidgets.QMessageBox(self)
                     msgbox.setDetailedText(format_exception(e))

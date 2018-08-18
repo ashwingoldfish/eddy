@@ -235,13 +235,18 @@ class Project(QtCore.QObject):
 
     def get_iri_and_rc_from_full_iri(self, full_iri):
 
-        last_slash = 999999
-        last_hash = 999999
+        last_slash = len(full_iri)
+        last_hash = len(full_iri)
 
         if '/' in full_iri:
             last_slash = full_iri.rindex('/')
         if '#' in full_iri:
             last_hash = full_iri.rindex('#')
+
+        if last_slash == len(full_iri):
+            last_slash = 0
+        if last_hash == len(full_iri):
+            last_hash = 0
 
         max_index = max(last_slash,last_hash)
 
