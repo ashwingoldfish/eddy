@@ -5628,7 +5628,8 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
                 else:
                     print(i, '-lo.a.Type', la.getAxiomType().toString())
 
-            print('decl_count', decl_count)
+            LOGGER.info('left_over_axioms_count(other than declarations) = '+ str(len(left_over_axioms)))
+            LOGGER.info('Declaration_axioms_count = '+ str(decl_count))
 
             self.Mark_all_disjoint_class_expressions(DisjointClasses_axioms)
 
@@ -5703,7 +5704,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
 
             t_end = time.clock()
 
-            print('algorithm computation', t_end - t_start)
+            LOGGER.info('algorithm computation time = '+ str(( t_end - t_start)))
 
             self.step(+50)
 
@@ -5725,4 +5726,4 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
             # self.finished.emit()
             t_end_final = time.clock()
 
-            print('total time taken = ', t_end_final - t_start)
+            LOGGER.info('total time taken = '+ str((t_end_final - t_start)))
