@@ -47,7 +47,7 @@ from eddy.core.diagram import Diagram
 from eddy.core.commands.nodes_2 import CommandProjetSetIRIPrefixesNodesDict
 from eddy.core.commands.project import CommandProjectDisconnectSpecificSignals, CommandProjectConnectSpecificSignals
 from eddy.core.commands.edges import CommandEdgeAdd, CommandEdgesBreakpointsAdd, CommandEdgesAdd
-from eddy.core.commands.nodes import CommandNodeAdd, CommandNodesAdd, CommandNodeSetMeta
+from eddy.core.commands.nodes import CommandNodeAdd, CommandNodesAdd, CommandNodeSetMeta, CommandNodesSetMeta
 from eddy.core.project import K_SYMMETRIC, K_TRANSITIVE, K_FUNCTIONAL, K_INVERSE_FUNCTIONAL, K_ASYMMETRIC, K_IRREFLEXIVE, K_REFLEXIVE
 from eddy.core.commands.diagram import CommandDiagramResize
 from eddy.core.datatypes.owl import OWLStandardIRIPrefixPairsDict
@@ -4642,7 +4642,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
             commands_to_return.append(
                 CommandEdgesBreakpointsAdd(list(all_diagrams), bp_edges, bp_indices, break_points))
 
-        return commands_to_return
+        return [commands_to_return, EDGE_diagram_edge_pair]
 
     def place_sub_graph_in_a_diagram(self, graph_dict_nodes, iri_node_str_dict, sp_inp):
 
@@ -4690,6 +4690,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
                                                              sp, depth)
             sp = sp + width_of_last_node
 
+        """
         summation_width = 0
         max_height = 0
         for r in list(root_nodes):
@@ -4700,6 +4701,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
             max_height = max(max_height, height)
 
         return [summation_width, max_height]
+        """
 
     def get_refined_graph(self, graph_dict_nodes, graph_dict_edges):
 
@@ -4840,15 +4842,10 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
         """
 
         # print('placing filtered classes')
-        values_1 = self.place_sub_graph_in_a_diagram(filtered_graph_dict_nodes, iri_node_str_dict, 0)
-        summation_width = values_1[0]
-        max_height = values_1[1]
+        self.place_sub_graph_in_a_diagram(filtered_graph_dict_nodes, iri_node_str_dict, 0)
         # print('placing filtered classes done')
 
         all_nodes = set(iri_node_str_dict.keys())
-
-        placed_nodes = set(self.occupied_positions_xy.keys())
-        unplaced_nodes = all_nodes.difference(placed_nodes)
 
         # place remaining nodes in the diagram
         # print('len(unplaced_nodes)_0',len(unplaced_nodes_0))
@@ -4872,14 +4869,14 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
 
         self.place_nodes_in_diagram_3(unplaced_nodes, graph_dict_nodes, graph_dict_edges, iri_node_str_dict)
 
-        #for un in unplaced_nodes:
-        #    print('un-',un)
+
 
         self.place_individual_nodes_in_diagram_2(graph_dict_nodes_inds, iri_node_str_dict)
 
-        edge_commands = self.place_edges_in_diagram(graph_dict_edges)
-        #edge_commands = []
+        edge_commands_and_edges_to_update = self.place_edges_in_diagram(graph_dict_edges)
 
+        #for un in unplaced_nodes:
+        #    print('un-',un)
         # summation_width_2 = values_2[0]
         # max_height_2 = values_2[1]
         # summation_width_3 = values_3[0]
@@ -4888,14 +4885,33 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
         # summation_width = summation_width_1 + summation_width_2 + summation_width_3
         # max_height = max(max_height_1,max_height_2,max_height_3)
 
-        return [summation_width, max_height, edge_commands]
+        max_X = list(self.occupied_positions_xy.values())[0][0]
+        max_Y = list(self.occupied_positions_xy.values())[0][1]
+        min_X = 0
+        min_Y = 0
+
+        for pos in self.occupied_positions_xy.values():
+
+            if pos[0] > max_X:
+                max_X = pos[0]
+            else:
+                if pos[0] < min_X:
+                    min_X = pos[0]
+
+            if pos[1] > max_Y:
+                max_Y = pos[1]
+            else:
+                if pos[1] < min_Y:
+                    min_Y = pos[1]
+
+        rectangle_to_set_for_diagram = QtCore.QRectF(QtCore.QPointF (min_X-250.0, min_Y-250.0), QtCore.QPointF(max_X+250.0, max_Y+250.0))
+        diagram_resize_command = CommandDiagramResize(self.diagram_to_place, rectangle_to_set_for_diagram)
+
+        return [diagram_resize_command, edge_commands_and_edges_to_update[0], edge_commands_and_edges_to_update[1]]
 
     def Process_metadata_for_roles_and_attributes(self, axioms, iri_node_str_dict):
 
-        commands_to_return = []
-
         itr = axioms.iterator()
-
         meta_dict_node = dict()
 
         while itr.hasNext():
@@ -4913,7 +4929,6 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
                 casted_property_exp = cast(self.OWLObjectPropertyExpression, property)
                 iri = casted_property_exp.asOWLObjectProperty().getIRI()
                 node = self.get_node_from_iri(iri, iri_node_str_dict)
-
 
             if str(node) not in meta_dict_node.keys():
                 meta_dict_node[str(node)] = [set(), node]
@@ -4949,6 +4964,8 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
                     #redo[K_INVERSE_FUNCTIONAL] = True
                     meta_dict_node[str(node)][0].add(K_INVERSE_FUNCTIONAL)
 
+        temp_lists = []
+
             #if undo!=redo:
         for str_node in meta_dict_node.keys():
             values = meta_dict_node[str_node]
@@ -4959,12 +4976,15 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
 
             node = values[1]
 
-            commands_to_return.append(CommandNodeSetMeta(self.project, node.type(), node.text(), dict(), temp_dict))
+            temp_lst = [node.type(), node.text(), dict(), temp_dict]
+            temp_lists.append(temp_lst)
 
-        return commands_to_return
+            #commands_to_return.append(CommandNodeSetMeta(self.project, node.type(), node.text(), dict(), temp_dict))
 
-    def generate_and_push_commands_to_the_session(self, iri_node_str_dict, other_nodes_to_add, width_to_set_for_diagram,\
-                                                  height_to_set_for_diagram, edge_commands, AllMetadataAxioms_JAVAset):
+        return CommandNodesSetMeta(self.project, temp_lists)
+
+    def generate_and_push_commands_to_the_session(self, iri_node_str_dict, other_nodes_to_add, diagram_resize_command,\
+                                                  edge_commands, edges_to_update, AllMetadataAxioms_JAVAset):
 
         t_start = time.clock()
 
@@ -5014,6 +5034,7 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
 
                     # commands_session.append(CommandNodeAdd(self.diagram_to_place, node))
 
+        commands_session.append(diagram_resize_command)
         commands_session.append(CommandProjectDisconnectSpecificSignals(self.project))
         commands_session.append(CommandProjetSetIRIPrefixesNodesDict(self.project, Duplicate_dict_2, Duplicate_dict_1,
                                                                      list(all_iris), None))
@@ -5027,15 +5048,15 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
         for c in edge_commands:
             commands_session.append(c)
 
-        attributes_and_roles_commands = self.Process_metadata_for_roles_and_attributes(AllMetadataAxioms_JAVAset,
+        attributes_and_roles_command = self.Process_metadata_for_roles_and_attributes(AllMetadataAxioms_JAVAset,
                                                                                        iri_node_str_dict)
-        commands_session.extend(attributes_and_roles_commands)
+        commands_session.append(attributes_and_roles_command)
+
+
 
         # commands_session.insert(0, CommandDiagramResize(self.diagram_to_place, self.diagram_to_place.sceneRect()))
         # commands_session.append(CommandDiagramResize(self.diagram_to_place, QtCore.QRectF(-5000, -5000, \
         #                (width_and_height_to_set_for_diagram[0]*300), (width_and_height_to_set_for_diagram[1]*300))))
-
-        print('len(edge_commands)', len(edge_commands))
 
         t1 = time.clock()
 
@@ -5052,6 +5073,16 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
                     tc_end = time.clock()
                     print('c-', c, '  tt', tc_end - tc_start)
             self.session.undostack.endMacro()
+
+        tc_start = time.clock()
+
+        print('len(edges_to_update)',len(edges_to_update))
+        print('len(self.project.edges())', len(self.project.edges()))
+
+        for edge in edges_to_update:
+            edge.updateEdge()
+        tc_end = time.clock()
+        print('edge_update-', tc_end - tc_start)
 
         print('>>> generate_and_push_commands_to_the_session END')
 
@@ -5664,14 +5695,11 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
             self.Process_Assertion_axioms(OBJECT_PROPERTY_ASSERTION_axioms, graph_dict_nodes_inds, graph_dict_edges, iri_node_str_dict, 21)
             self.Process_Assertion_axioms(NEGATIVE_OBJECT_PROPERTY_ASSERTION_axioms, graph_dict_nodes_inds, graph_dict_edges, iri_node_str_dict, 22)
 
-
-
             method_return_values = self.place_graph_in_a_diagram(graph_dict_nodes, graph_dict_nodes_inds, graph_dict_edges, iri_node_str_dict)
 
-            width_to_set_for_diagram = method_return_values[0]
-            height_to_set_for_diagram = method_return_values[1]
-            edge_commands = method_return_values[2]
-            # other_nodes_to_add = method_return_values[3]
+            diagram_resize_command = method_return_values[0]
+            edge_commands = method_return_values[1]
+            edges_to_update = method_return_values[2]
 
             t_end = time.clock()
 
@@ -5679,8 +5707,8 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
 
             self.step(+50)
 
-            self.generate_and_push_commands_to_the_session(iri_node_str_dict, set(), width_to_set_for_diagram, \
-                                                           height_to_set_for_diagram, edge_commands, AllMetadataAxioms_JAVAset)
+            self.generate_and_push_commands_to_the_session(iri_node_str_dict, set(), diagram_resize_command, \
+                                       edge_commands, edges_to_update, AllMetadataAxioms_JAVAset)
             self.step(+50)
 
             detach()
@@ -5695,4 +5723,6 @@ class OWL2OntologyLoader(AbstractOntologyLoader, HasThreadingSystem):
             self.sgnCompleted.emit()
         finally:
             # self.finished.emit()
-            pass
+            t_end_final = time.clock()
+
+            print('total time taken = ', t_end_final - t_start)

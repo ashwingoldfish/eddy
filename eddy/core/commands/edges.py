@@ -152,7 +152,7 @@ class CommandEdgesAdd(QtWidgets.QUndoCommand):
             diagram = self.diagrams[e]
             diagram.addItem(edge)
             # Update edge geometry.
-            edge.updateEdge()
+            #edge.updateEdge()       removed to save time, all edges can be updated once
             # Emit diagram specific signals.
             diagram.sgnItemAdded.emit(diagram, edge)
         # if self.update_diagram:
@@ -233,7 +233,7 @@ class CommandEdgesBreakpointsAdd(QtWidgets.QUndoCommand):
             index = self.indices[i]
             point = self.points[i]
             edge.breakpoints.insert(index, point)
-            edge.updateEdge()
+            #edge.updateEdge()       removed to save time, all edges can be updated once
         for diag in self.diagrams:
             diag.sgnUpdated.emit()
 
@@ -242,7 +242,7 @@ class CommandEdgesBreakpointsAdd(QtWidgets.QUndoCommand):
         for i,edge in enumerate(self.edges):
             index = self.indices[i]
             edge.breakpoints.pop(index)
-            edge.updateEdge()
+            #edge.updateEdge()       removed to save time, all edges can be updated once
         for diag in self.diagrams:
             diag.sgnUpdated.emit()
 

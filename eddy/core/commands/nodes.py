@@ -391,6 +391,53 @@ class CommandNodeSetMeta(QtWidgets.QUndoCommand):
             node.updateNode(selected=node.isSelected())
 
 
+class CommandNodesSetMeta(QtWidgets.QUndoCommand):
+    """
+    This command is used to set predicates meta.
+    """
+    #def __init__(self, project, item, predicate, undo, redo, name=None):
+    def __init__(self, project, quaderplets, name=None):
+        """
+        Initialize the command.
+        :type project: Project
+        :type item: Item
+        :type predicate: str
+        :type undo: dict
+        :type redo: dict
+        :type name: str
+        """
+        super().__init__(name or 'set meta')
+
+        self._project = project
+        self.quaderplets = quaderplets
+
+    def redo(self):
+        """redo the command"""
+        for quaderplet in self.quaderplets:
+
+            item = quaderplet[0]
+            predicate = quaderplet[1]
+            #undo = quaderplet[2]
+            redo = quaderplet[3]
+
+            self._project.setMeta(item, predicate, redo)
+            for node in self._project.predicates(item, predicate):
+                node.updateNode(selected=node.isSelected())
+
+    def undo(self):
+        """undo the command"""
+        for quaderplet in self.quaderplets:
+
+            item = quaderplet[0]
+            predicate = quaderplet[1]
+            undo = quaderplet[2]
+            #redo = quaderplet[3]
+
+            self._project.setMeta(item, predicate, undo)
+            for node in self._project.predicates(item, predicate):
+                node.updateNode(selected=node.isSelected())
+
+
 class CommandNodeChangeInputsOrder(QtWidgets.QUndoCommand):
     """
     This command is used to change the order of Role chain and Property assertion inputs.
